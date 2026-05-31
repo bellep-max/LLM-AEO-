@@ -1845,7 +1845,7 @@ export function ChatPage() {
         </TabsContent>
 
         {/* ── Tab 4: Chat ───────────────────────────────────────────────── */}
-        <TabsContent value="chat" className="mt-0 flex flex-1">
+        <TabsContent value="chat" className="mt-0 flex flex-1 min-h-0">
           {/* Conversation sidebar */}
           <div className="w-64 border-r border-border bg-card/50 flex flex-col shrink-0">
             {/* Header */}
@@ -1948,7 +1948,7 @@ export function ChatPage() {
           </div>
 
           {/* Chat messages + input */}
-          <div className="flex-1 flex flex-col bg-background">
+          <div className="flex-1 flex flex-col bg-background min-h-0">
             <div
               ref={scrollRef}
               className="flex-1 overflow-y-auto p-4 sm:p-8 space-y-6"
