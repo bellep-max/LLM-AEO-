@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Send, Plus, Trash2, TerminalSquare, Sparkles, Link2, Target } from "lucide-react";
+import { Send, Plus, Trash2, TerminalSquare, Sparkles, Link2, Target, RotateCcw } from "lucide-react";
 import {
   useListOpenaiConversations,
   getListOpenaiConversationsQueryKey,
@@ -278,6 +278,60 @@ export function ChatPage() {
   const handleNewConversation = () => {
     setActiveView("chat");
     setActiveId(null);
+  };
+
+  const clearAnalyzer = () => {
+    setBusinessName("");
+    setBusinessDescription("");
+    setAnalysisResult(null);
+    setAnalysisError(null);
+  };
+
+  const clearAudit = () => {
+    setBusinessName("");
+    setBusinessDescription("");
+    setBusinessType("B2B SaaS");
+    setBusinessTypeOther("");
+    setBusinessSize("small");
+    setCompetitorDensity("");
+    setAuditResult(null);
+    setAuditError(null);
+  };
+
+  const clearSelfCreatable = () => {
+    setBlKeyword("");
+    setBlTargetUrl("");
+    setBlCompetitors("");
+    setBlBusinessType("local");
+    setBacklinksResult(null);
+    setBacklinksError(null);
+    setExpandedBl(null);
+  };
+
+  const clearLinkProspects = () => {
+    setLpKeyword("");
+    setLpTargetUrl("");
+    setLpResult(null);
+    setLpError(null);
+    setExpandedLp(null);
+  };
+
+  const clearContentWriter = () => {
+    setCwTargetUrl("");
+    setCwAnchor("");
+    setCwTopic("");
+    setCwResult(null);
+    setCwError(null);
+    setCwCopied(false);
+  };
+
+  const clearInjectContent = () => {
+    setCiExisting("");
+    setCiTargetUrl("");
+    setCiAnchor("");
+    setCiResult(null);
+    setCiError(null);
+    setCiCopied(false);
   };
 
   const handleClearAll = async () => {
@@ -650,13 +704,23 @@ export function ChatPage() {
             <div className="mx-auto max-w-3xl flex flex-col gap-6">
               <Card className="border-primary/20 shadow-none">
                 <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Sparkles className="h-5 w-5 text-primary" />
-                    AEO Business Analyzer
-                  </CardTitle>
-                  <CardDescription>
-                    Enter your business details to run a full AEO analysis — keywords, scoring, prompts, and backlink targets.
-                  </CardDescription>
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <CardTitle className="flex items-center gap-2">
+                        <Sparkles className="h-5 w-5 text-primary" />
+                        AEO Business Analyzer
+                      </CardTitle>
+                      <CardDescription className="mt-1">
+                        Enter your business details to run a full AEO analysis — keywords, scoring, prompts, and backlink targets.
+                      </CardDescription>
+                    </div>
+                    {(businessName || businessDescription || analysisResult) && (
+                      <Button variant="ghost" size="sm" className="gap-1.5 text-muted-foreground shrink-0" onClick={clearAnalyzer}>
+                        <RotateCcw className="h-3.5 w-3.5" />
+                        Clear
+                      </Button>
+                    )}
+                  </div>
                 </CardHeader>
                 <CardContent>
                   <form onSubmit={handleAnalyzeBusiness} className="flex flex-col gap-4">
@@ -758,13 +822,23 @@ export function ChatPage() {
           <div className="mx-auto max-w-6xl space-y-6">
             <Card className="border-primary/20 shadow-none">
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Sparkles className="h-4 w-4" />
-                  Full AEO Audit
-                </CardTitle>
-                <CardDescription>
-                  ICE keyword scoring, example prompt PQS, required search volume, and backlink strategy — all in one run. Traced in Langfuse.
-                </CardDescription>
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <Sparkles className="h-4 w-4" />
+                      Full AEO Audit
+                    </CardTitle>
+                    <CardDescription className="mt-1">
+                      ICE keyword scoring, example prompt PQS, required search volume, and backlink strategy — all in one run. Traced in Langfuse.
+                    </CardDescription>
+                  </div>
+                  {(businessName || businessDescription || auditResult) && (
+                    <Button variant="ghost" size="sm" className="gap-1.5 text-muted-foreground shrink-0" onClick={clearAudit}>
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      Clear
+                    </Button>
+                  )}
+                </div>
               </CardHeader>
               <CardContent>
                 <form onSubmit={handleRunAudit} className="flex flex-col gap-4">
@@ -979,6 +1053,36 @@ export function ChatPage() {
         <TabsContent value="backlinks" className="mt-0 flex-1 overflow-y-auto p-4 sm:p-8">
           <div className="mx-auto max-w-4xl space-y-6">
 
+            {/* Partial analysis from Business Analyzer */}
+            {analysisData?.backlinks && analysisData.backlinks.length > 0 && (
+              <Card className="border-blue-500/20 bg-blue-500/5 shadow-none">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm flex items-center gap-2 text-blue-600">
+                    <Sparkles className="h-4 w-4" />
+                    From Business Analysis — {analysisData.business_name || businessName}
+                  </CardTitle>
+                  <CardDescription className="text-xs">
+                    Backlink targets identified during your last Business Analyzer run. Use these as a reference when filling in the forms below.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {analysisData.backlinks.map((bl, i) => (
+                      <div key={i} className="flex items-start gap-2 rounded-md border bg-background px-3 py-2 text-xs">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-foreground truncate">{bl.site}</p>
+                          <p className="text-muted-foreground mt-0.5">{bl.reason}</p>
+                        </div>
+                        <span className="shrink-0 inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground capitalize">
+                          {bl.type}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {/* Sub-tab switcher */}
             <div className="flex gap-1 rounded-lg border bg-muted/30 p-1 w-fit">
               {(["self-create", "prospects", "content-writer"] as const).map((mode) => (
@@ -1003,13 +1107,23 @@ export function ChatPage() {
             {/* Form */}
             <Card className="border-primary/20 shadow-none">
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Link2 className="h-5 w-5 text-primary" />
-                  Backlinks Injection
-                </CardTitle>
-                <CardDescription>
-                  Generate self-creatable backlink opportunities with step-by-step instructions, DA estimates, and a hallucination self-audit. Traced in Langfuse.
-                </CardDescription>
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <Link2 className="h-5 w-5 text-primary" />
+                      Backlinks Injection
+                    </CardTitle>
+                    <CardDescription className="mt-1">
+                      Generate self-creatable backlink opportunities with step-by-step instructions, DA estimates, and a hallucination self-audit. Traced in Langfuse.
+                    </CardDescription>
+                  </div>
+                  {(blKeyword || blTargetUrl || backlinksResult) && (
+                    <Button variant="ghost" size="sm" className="gap-1.5 text-muted-foreground shrink-0" onClick={clearSelfCreatable}>
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      Clear
+                    </Button>
+                  )}
+                </div>
               </CardHeader>
               <CardContent>
                 <form onSubmit={handleGenerateBacklinks} className="space-y-4">
@@ -1236,13 +1350,23 @@ export function ChatPage() {
                 {/* Form */}
                 <Card className="border-primary/20 shadow-none">
                   <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Target className="h-5 w-5 text-primary" />
-                      Link Prospects
-                    </CardTitle>
-                    <CardDescription>
-                      Find real outreach targets with injection type, DA, relevance, and an exact content insertion guide — every prospect self-audited for hallucinations. Traced in Langfuse.
-                    </CardDescription>
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <CardTitle className="flex items-center gap-2">
+                          <Target className="h-5 w-5 text-primary" />
+                          Link Prospects
+                        </CardTitle>
+                        <CardDescription className="mt-1">
+                          Find real outreach targets with injection type, DA, relevance, and an exact content insertion guide — every prospect self-audited for hallucinations. Traced in Langfuse.
+                        </CardDescription>
+                      </div>
+                      {(lpKeyword || lpTargetUrl || lpResult) && (
+                        <Button variant="ghost" size="sm" className="gap-1.5 text-muted-foreground shrink-0" onClick={clearLinkProspects}>
+                          <RotateCcw className="h-3.5 w-3.5" />
+                          Clear
+                        </Button>
+                      )}
+                    </div>
                   </CardHeader>
                   <CardContent>
                     <form onSubmit={handleGenerateLinkProspects} className="space-y-3">
@@ -1462,13 +1586,23 @@ export function ChatPage() {
                 {/* Form */}
                 <Card className="border-primary/20 shadow-none">
                   <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Sparkles className="h-5 w-5 text-primary" />
-                      Content Writer
-                    </CardTitle>
-                    <CardDescription>
-                      Generate human-sounding content with one backlink naturally embedded — designed to pass AI-content detectors and spam filters. Traced in Langfuse.
-                    </CardDescription>
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <CardTitle className="flex items-center gap-2">
+                          <Sparkles className="h-5 w-5 text-primary" />
+                          Content Writer
+                        </CardTitle>
+                        <CardDescription className="mt-1">
+                          Generate human-sounding content with one backlink naturally embedded — designed to pass AI-content detectors and spam filters. Traced in Langfuse.
+                        </CardDescription>
+                      </div>
+                      {(cwTargetUrl || cwTopic || cwResult) && (
+                        <Button variant="ghost" size="sm" className="gap-1.5 text-muted-foreground shrink-0" onClick={clearContentWriter}>
+                          <RotateCcw className="h-3.5 w-3.5" />
+                          Clear
+                        </Button>
+                      )}
+                    </div>
                   </CardHeader>
                   <CardContent>
                     <form onSubmit={handleGenerateContent} className="space-y-3">
@@ -1609,13 +1743,23 @@ export function ChatPage() {
 
                 <Card className="border-primary/20 shadow-none">
                   <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Link2 className="h-5 w-5 text-primary" />
-                      Inject Backlink into Existing Content
-                    </CardTitle>
-                    <CardDescription>
-                      Paste any existing text and specify a URL — the model weaves the backlink in naturally without changing your voice.
-                    </CardDescription>
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <CardTitle className="flex items-center gap-2">
+                          <Link2 className="h-5 w-5 text-primary" />
+                          Inject Backlink into Existing Content
+                        </CardTitle>
+                        <CardDescription className="mt-1">
+                          Paste any existing text and specify a URL — the model weaves the backlink in naturally without changing your voice.
+                        </CardDescription>
+                      </div>
+                      {(ciExisting || ciTargetUrl || ciResult) && (
+                        <Button variant="ghost" size="sm" className="gap-1.5 text-muted-foreground shrink-0" onClick={clearInjectContent}>
+                          <RotateCcw className="h-3.5 w-3.5" />
+                          Clear
+                        </Button>
+                      )}
+                    </div>
                   </CardHeader>
                   <CardContent>
                     <form onSubmit={handleInjectBacklink} className="space-y-3">
