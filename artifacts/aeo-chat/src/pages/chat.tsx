@@ -20,7 +20,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+import { useHistory } from "@/contexts/history-context";
 
 type AnalysisKeyword = {
   phrase: string;
@@ -231,7 +233,8 @@ export function ChatPage() {
   const [isInjectingCi, setIsInjectingCi]     = useState(false);
   const [ciCopied, setCiCopied]               = useState(false);
   // ── Audit form (Full AEO Audit + Backlinks tabs) ───────────────────────────
-  const [businessType, setBusinessType] = useState("local brick-and-mortar");
+  const [businessType, setBusinessType] = useState("B2B SaaS");
+  const [businessTypeOther, setBusinessTypeOther] = useState("");
   const [businessSize, setBusinessSize] = useState("small");
   const [competitorDensity, setCompetitorDensity] = useState("");
   const [auditResult, setAuditResult] = useState<BusinessAuditResult | null>(null);
@@ -239,6 +242,7 @@ export function ChatPage() {
   const [isAuditing, setIsAuditing] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const { addEntry, selectedEntry, selectEntry } = useHistory();
 
   const { data: conversations = [], isLoading: loadingConversations } = useListOpenaiConversations();
   const { data: messages = [], isLoading: loadingMessages } = useListOpenaiMessages(
@@ -256,9 +260,32 @@ export function ChatPage() {
     }
   }, [messages, streamingText]);
 
+  // Restore result view when a history entry is selected from the sidebar
+  useEffect(() => {
+    if (!selectedEntry) return;
+    if (selectedEntry.type === "Business Analyzer") {
+      setAnalysisResult(selectedEntry.result as BusinessAnalysisResult);
+      setActiveView("analyzer");
+    } else if (selectedEntry.type === "Full AEO Audit") {
+      setAuditResult(selectedEntry.result as BusinessAuditResult);
+      setActiveView("analysis");
+    }
+    selectEntry(null); // consume so re-selecting same entry works again
+  }, [selectedEntry]);
+
+  const [clearAllConfirm, setClearAllConfirm] = useState(false);
+
   const handleNewConversation = () => {
     setActiveView("chat");
     setActiveId(null);
+  };
+
+  const handleClearAll = async () => {
+    if (!clearAllConfirm) { setClearAllConfirm(true); return; }
+    setClearAllConfirm(false);
+    await fetch("/api/openai/conversations", { method: "DELETE" });
+    setActiveId(null);
+    queryClient.invalidateQueries({ queryKey: getListOpenaiConversationsQueryKey() });
   };
 
   const handleDelete = (id: number, e: React.MouseEvent) => {
@@ -364,6 +391,12 @@ export function ChatPage() {
 
       setAnalysisResult(payload as BusinessAnalysisResult);
       setActiveView("analysis");
+      addEntry({
+        type: "Business Analyzer",
+        businessName: (payload as BusinessAnalysisResult).data?.business_name || businessName,
+        traceUrl: (payload as BusinessAnalysisResult).trace_url,
+        result: payload,
+      });
     } catch (error) {
       setAnalysisError(error instanceof Error ? error.message : "Business analysis failed");
       setAnalysisResult(null);
@@ -413,7 +446,9 @@ export function ChatPage() {
         body: JSON.stringify({
           businessName: businessName.trim(),
           description: businessDescription.trim(),
-          businessType,
+          businessType: businessType === "other" && businessTypeOther.trim()
+            ? businessTypeOther.trim()
+            : businessType,
           businessSize,
           competitorDensity,
         }),
@@ -421,6 +456,12 @@ export function ChatPage() {
       const payload = await res.json();
       if (!res.ok) throw new Error(payload.error || "Audit failed");
       setAuditResult(payload as BusinessAuditResult);
+      addEntry({
+        type: "Full AEO Audit",
+        businessName,
+        traceUrl: (payload as BusinessAuditResult).trace_url,
+        result: payload,
+      });
     } catch (error) {
       setAuditError(error instanceof Error ? error.message : "Audit failed");
       setAuditResult(null);
@@ -589,73 +630,8 @@ export function ChatPage() {
     "bg-rose-500/15 text-rose-600 border-rose-500/30";
 
   // Shared audit form rendered in both tabs
-  const AuditForm = ({ submitLabel, icon }: { submitLabel: string; icon: React.ReactNode }) => (
-    <Card className="border-primary/20 shadow-none">
-      <CardContent className="pt-6">
-        <form onSubmit={handleRunAudit} className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-[1fr_auto]">
-            <div className="space-y-3">
-              <Input
-                value={businessName}
-                onChange={(e) => setBusinessName(e.target.value)}
-                placeholder="Business name"
-                disabled={isAuditing}
-              />
-              <Textarea
-                value={businessDescription}
-                onChange={(e) => setBusinessDescription(e.target.value)}
-                placeholder="Describe the business, market, and what you want AEO to optimise for."
-                className="min-h-24 resize-none"
-                disabled={isAuditing}
-              />
-            </div>
-            <div className="flex flex-col gap-3 min-w-[190px]">
-              <Select value={businessType} onValueChange={setBusinessType} disabled={isAuditing}>
-                <SelectTrigger><SelectValue placeholder="Business type" /></SelectTrigger>
-                <SelectContent>
-                  {[
-                    "local brick-and-mortar",
-                    "B2B SaaS",
-                    "e-commerce",
-                    "healthcare/ymyl",
-                    "legal/financial",
-                    "news/media",
-                    "other",
-                  ].map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              <Select value={businessSize} onValueChange={setBusinessSize} disabled={isAuditing}>
-                <SelectTrigger><SelectValue placeholder="Business size" /></SelectTrigger>
-                <SelectContent>
-                  {["small","medium","enterprise"].map(s => (
-                    <SelectItem key={s} value={s} className="capitalize">{s}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Input
-                type="number"
-                min={1}
-                max={5}
-                value={competitorDensity}
-                onChange={(e) => setCompetitorDensity(e.target.value)}
-                placeholder="Competitor density 1-5 (optional)"
-                disabled={isAuditing}
-              />
-              <Button
-                type="submit"
-                className="gap-2 w-full"
-                disabled={!businessName.trim() || !businessDescription.trim() || isAuditing}
-              >
-                {icon}
-                {isAuditing ? "Running…" : submitLabel}
-              </Button>
-            </div>
-          </div>
-          {auditError && <p className="text-sm text-destructive">{auditError}</p>}
-        </form>
-      </CardContent>
-    </Card>
-  );
+  // AuditForm JSX is inlined directly in the Full AEO Audit tab below (not a component)
+  // to prevent React remounting inputs on every keystroke (focus-loss bug).
 
   return (
     <div className="flex h-full w-full flex-col">
@@ -684,19 +660,25 @@ export function ChatPage() {
                 </CardHeader>
                 <CardContent>
                   <form onSubmit={handleAnalyzeBusiness} className="flex flex-col gap-4">
-                    <Input
-                      value={businessName}
-                      onChange={(e) => setBusinessName(e.target.value)}
-                      placeholder="Business name"
-                      disabled={isAnalyzing}
-                    />
-                    <Textarea
-                      value={businessDescription}
-                      onChange={(e) => setBusinessDescription(e.target.value)}
-                      placeholder="Describe the business, offer, market, and what you want AEO to optimize for."
-                      className="min-h-32"
-                      disabled={isAnalyzing}
-                    />
+                    <div className="flex flex-col gap-1.5">
+                      <Label>Business name</Label>
+                      <Input
+                        value={businessName}
+                        onChange={(e) => setBusinessName(e.target.value)}
+                        placeholder="e.g. American Plumbing Co."
+                        disabled={isAnalyzing}
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <Label>What does your business do?</Label>
+                      <Textarea
+                        value={businessDescription}
+                        onChange={(e) => setBusinessDescription(e.target.value)}
+                        placeholder="Describe the business, offer, market, and what you want AEO to optimize for."
+                        className="min-h-32"
+                        disabled={isAnalyzing}
+                      />
+                    </div>
                     <Button
                       type="submit"
                       className="gap-2 self-start"
@@ -774,7 +756,90 @@ export function ChatPage() {
         {/* ── Tab 2: Full AEO Audit ─────────────────────────────────────── */}
         <TabsContent value="analysis" className="mt-0 flex-1 overflow-y-auto p-4 sm:p-8">
           <div className="mx-auto max-w-6xl space-y-6">
-            <AuditForm submitLabel="Run Full Audit" icon={<Sparkles className="h-4 w-4" />} />
+            <Card className="border-primary/20 shadow-none">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Sparkles className="h-4 w-4" />
+                  Full AEO Audit
+                </CardTitle>
+                <CardDescription>
+                  ICE keyword scoring, example prompt PQS, required search volume, and backlink strategy — all in one run. Traced in Langfuse.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <form onSubmit={handleRunAudit} className="flex flex-col gap-4">
+                  <div className="flex flex-col gap-1.5">
+                    <Label>Business name</Label>
+                    <Input
+                      value={businessName}
+                      onChange={(e) => setBusinessName(e.target.value)}
+                      placeholder="e.g. American Plumbing Co."
+                      disabled={isAuditing}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label>What does your business do?</Label>
+                    <Textarea
+                      value={businessDescription}
+                      onChange={(e) => setBusinessDescription(e.target.value)}
+                      placeholder="Describe the business, offer, and market — the more specific, the better the audit."
+                      className="min-h-32"
+                      disabled={isAuditing}
+                    />
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-3">
+                    <div className="flex flex-col gap-1.5">
+                      <Label>What type of business?</Label>
+                      <Select value={businessType} onValueChange={setBusinessType} disabled={isAuditing}>
+                        <SelectTrigger><SelectValue placeholder="Business type" /></SelectTrigger>
+                        <SelectContent>
+                          {["B2B SaaS", "B2C", "eCommerce", "local service", "agency", "other"].map((t) => (
+                            <SelectItem key={t} value={t}>{t}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <Label>How big is the business?</Label>
+                      <Select value={businessSize} onValueChange={setBusinessSize} disabled={isAuditing}>
+                        <SelectTrigger><SelectValue placeholder="Business size" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="small">Small (&lt;50)</SelectItem>
+                          <SelectItem value="medium">Medium (50–500)</SelectItem>
+                          <SelectItem value="large">Large (500+)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <Label>How many competitors?</Label>
+                      <Input
+                        value={competitorDensity}
+                        onChange={(e) => setCompetitorDensity(e.target.value)}
+                        placeholder="e.g. low, medium, high"
+                        disabled={isAuditing}
+                      />
+                    </div>
+                  </div>
+                  {businessType === "other" && (
+                    <Input
+                      value={businessTypeOther}
+                      onChange={(e) => setBusinessTypeOther(e.target.value)}
+                      placeholder="Describe your business type"
+                      disabled={isAuditing}
+                    />
+                  )}
+                  <Button
+                    type="submit"
+                    className="gap-2 self-start"
+                    disabled={!businessName.trim() || !businessDescription.trim() || isAuditing}
+                  >
+                    <Sparkles className="h-4 w-4" />
+                    {isAuditing ? "Auditing..." : "Run Full Audit"}
+                  </Button>
+                </form>
+                {auditError && <p className="mt-3 text-sm text-destructive">{auditError}</p>}
+              </CardContent>
+            </Card>
 
             {auditData && (
               <div className="grid gap-6 xl:grid-cols-[1.5fr_1fr]">
@@ -950,38 +1015,50 @@ export function ChatPage() {
                 <form onSubmit={handleGenerateBacklinks} className="space-y-4">
                   <div className="grid gap-4 sm:grid-cols-[1fr_auto]">
                     <div className="space-y-3">
-                      <Input
-                        value={blKeyword}
-                        onChange={(e) => setBlKeyword(e.target.value)}
-                        placeholder="Target keyword (e.g. emergency plumber San Diego)"
-                        disabled={isGeneratingBl}
-                      />
-                      <Input
-                        value={blTargetUrl}
-                        onChange={(e) => setBlTargetUrl(e.target.value)}
-                        placeholder="Target URL to promote (e.g. https://example.com/plumbing)"
-                        disabled={isGeneratingBl}
-                      />
-                      <Textarea
-                        value={blCompetitors}
-                        onChange={(e) => setBlCompetitors(e.target.value)}
-                        placeholder="Competitor URLs (optional, comma-separated, up to 3)"
-                        className="min-h-16 resize-none"
-                        disabled={isGeneratingBl}
-                      />
+                      <div className="flex flex-col gap-1.5">
+                        <Label>Target keyword</Label>
+                        <Input
+                          value={blKeyword}
+                          onChange={(e) => setBlKeyword(e.target.value)}
+                          placeholder="e.g. emergency plumber San Diego"
+                          disabled={isGeneratingBl}
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <Label>Target URL</Label>
+                        <Input
+                          value={blTargetUrl}
+                          onChange={(e) => setBlTargetUrl(e.target.value)}
+                          placeholder="e.g. https://example.com/plumbing"
+                          disabled={isGeneratingBl}
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <Label>Competitor URLs</Label>
+                        <Textarea
+                          value={blCompetitors}
+                          onChange={(e) => setBlCompetitors(e.target.value)}
+                          placeholder="Optional, comma-separated, up to 3"
+                          className="min-h-16 resize-none"
+                          disabled={isGeneratingBl}
+                        />
+                      </div>
                     </div>
                     <div className="flex flex-col gap-3 min-w-[160px]">
-                      <Select value={blBusinessType} onValueChange={setBlBusinessType} disabled={isGeneratingBl}>
-                        <SelectTrigger><SelectValue placeholder="Business type" /></SelectTrigger>
-                        <SelectContent>
-                          {["local", "small", "medium"].map(t => (
-                            <SelectItem key={t} value={t} className="capitalize">{t}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <div className="flex flex-col gap-1.5">
+                        <Label>Business type</Label>
+                        <Select value={blBusinessType} onValueChange={setBlBusinessType} disabled={isGeneratingBl}>
+                          <SelectTrigger><SelectValue placeholder="Business type" /></SelectTrigger>
+                          <SelectContent>
+                            {["local", "small", "medium"].map(t => (
+                              <SelectItem key={t} value={t} className="capitalize">{t}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
                       <Button
                         type="submit"
-                        className="gap-2 w-full"
+                        className="gap-2 w-full mt-auto"
                         disabled={!blKeyword.trim() || !blTargetUrl.trim() || isGeneratingBl}
                       >
                         <Link2 className="h-4 w-4" />
@@ -1169,28 +1246,34 @@ export function ChatPage() {
                   </CardHeader>
                   <CardContent>
                     <form onSubmit={handleGenerateLinkProspects} className="space-y-3">
-                      <Input
-                        value={lpKeyword}
-                        onChange={(e) => setLpKeyword(e.target.value)}
-                        placeholder="Target keyword (e.g. emergency plumber San Diego)"
-                        disabled={isGeneratingLp}
-                      />
-                      <div className="flex gap-3">
+                      <div className="flex flex-col gap-1.5">
+                        <Label>Target keyword</Label>
                         <Input
-                          className="flex-1"
-                          value={lpTargetUrl}
-                          onChange={(e) => setLpTargetUrl(e.target.value)}
-                          placeholder="Target URL to promote (e.g. https://example.com/plumbing)"
+                          value={lpKeyword}
+                          onChange={(e) => setLpKeyword(e.target.value)}
+                          placeholder="e.g. emergency plumber San Diego"
                           disabled={isGeneratingLp}
                         />
-                        <Button
-                          type="submit"
-                          className="gap-2 shrink-0"
-                          disabled={!lpKeyword.trim() || !lpTargetUrl.trim() || isGeneratingLp}
-                        >
-                          <Target className="h-4 w-4" />
-                          {isGeneratingLp ? "Generating…" : "Find Prospects"}
-                        </Button>
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <Label>Target URL</Label>
+                        <div className="flex gap-3">
+                          <Input
+                            className="flex-1"
+                            value={lpTargetUrl}
+                            onChange={(e) => setLpTargetUrl(e.target.value)}
+                            placeholder="e.g. https://example.com/plumbing"
+                            disabled={isGeneratingLp}
+                          />
+                          <Button
+                            type="submit"
+                            className="gap-2 shrink-0"
+                            disabled={!lpKeyword.trim() || !lpTargetUrl.trim() || isGeneratingLp}
+                          >
+                            <Target className="h-4 w-4" />
+                            {isGeneratingLp ? "Generating…" : "Find Prospects"}
+                          </Button>
+                        </div>
                       </div>
                       {lpError && <p className="text-sm text-destructive">{lpError}</p>}
                     </form>
@@ -1390,50 +1473,65 @@ export function ChatPage() {
                   <CardContent>
                     <form onSubmit={handleGenerateContent} className="space-y-3">
                       <div className="grid gap-3 sm:grid-cols-2">
-                        <Select value={cwPlatform} onValueChange={setCwPlatform} disabled={isGeneratingCw}>
-                          <SelectTrigger><SelectValue placeholder="Platform type" /></SelectTrigger>
-                          <SelectContent>
-                            {[
-                              "forum comment",
-                              "blog comment",
-                              "directory listing description",
-                              "Facebook group post",
-                              "LinkedIn comment",
-                              "Q&A site answer",
-                              "resource page suggestion",
-                              "Reddit comment",
-                              "Quora answer",
-                            ].map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
-                        <Select value={cwStyle} onValueChange={setCwStyle} disabled={isGeneratingCw}>
-                          <SelectTrigger><SelectValue placeholder="Writing style" /></SelectTrigger>
-                          <SelectContent>
-                            {["casual", "helpful", "professional", "enthusiastic", "brief"].map(s => (
-                              <SelectItem key={s} value={s} className="capitalize">{s}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <div className="flex flex-col gap-1.5">
+                          <Label>Platform</Label>
+                          <Select value={cwPlatform} onValueChange={setCwPlatform} disabled={isGeneratingCw}>
+                            <SelectTrigger><SelectValue placeholder="Platform type" /></SelectTrigger>
+                            <SelectContent>
+                              {[
+                                "forum comment",
+                                "blog comment",
+                                "directory listing description",
+                                "Facebook group post",
+                                "LinkedIn comment",
+                                "Q&A site answer",
+                                "resource page suggestion",
+                                "Reddit comment",
+                                "Quora answer",
+                              ].map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="flex flex-col gap-1.5">
+                          <Label>Writing style</Label>
+                          <Select value={cwStyle} onValueChange={setCwStyle} disabled={isGeneratingCw}>
+                            <SelectTrigger><SelectValue placeholder="Writing style" /></SelectTrigger>
+                            <SelectContent>
+                              {["casual", "helpful", "professional", "enthusiastic", "brief"].map(s => (
+                                <SelectItem key={s} value={s} className="capitalize">{s}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
                       </div>
-                      <Input
-                        value={cwTargetUrl}
-                        onChange={(e) => setCwTargetUrl(e.target.value)}
-                        placeholder="Target URL to embed (e.g. https://americanplumbing.com)"
-                        disabled={isGeneratingCw}
-                      />
-                      <Input
-                        value={cwAnchor}
-                        onChange={(e) => setCwAnchor(e.target.value)}
-                        placeholder="Anchor text (optional — leave blank to let the model choose naturally)"
-                        disabled={isGeneratingCw}
-                      />
-                      <Textarea
-                        value={cwTopic}
-                        onChange={(e) => setCwTopic(e.target.value)}
-                        placeholder="Topic/context — describe the discussion this content fits into (e.g. 'Thread asking for reliable emergency plumbers in San Diego')"
-                        className="min-h-20 resize-none"
-                        disabled={isGeneratingCw}
-                      />
+                      <div className="flex flex-col gap-1.5">
+                        <Label>Target URL</Label>
+                        <Input
+                          value={cwTargetUrl}
+                          onChange={(e) => setCwTargetUrl(e.target.value)}
+                          placeholder="e.g. https://americanplumbing.com"
+                          disabled={isGeneratingCw}
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <Label>Anchor text</Label>
+                        <Input
+                          value={cwAnchor}
+                          onChange={(e) => setCwAnchor(e.target.value)}
+                          placeholder="Optional — leave blank to let the model choose naturally"
+                          disabled={isGeneratingCw}
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <Label>Topic / context</Label>
+                        <Textarea
+                          value={cwTopic}
+                          onChange={(e) => setCwTopic(e.target.value)}
+                          placeholder="Describe the discussion this content fits into (e.g. 'Thread asking for reliable emergency plumbers in San Diego')"
+                          className="min-h-20 resize-none"
+                          disabled={isGeneratingCw}
+                        />
+                      </div>
                       <Button
                         type="submit"
                         className="gap-2"
@@ -1521,26 +1619,35 @@ export function ChatPage() {
                   </CardHeader>
                   <CardContent>
                     <form onSubmit={handleInjectBacklink} className="space-y-3">
-                      <Textarea
-                        value={ciExisting}
-                        onChange={(e) => setCiExisting(e.target.value)}
-                        placeholder="Paste your existing content here…"
-                        className="min-h-32 resize-y font-sans"
-                        disabled={isInjectingCi}
-                      />
+                      <div className="flex flex-col gap-1.5">
+                        <Label>Existing content</Label>
+                        <Textarea
+                          value={ciExisting}
+                          onChange={(e) => setCiExisting(e.target.value)}
+                          placeholder="Paste your existing content here…"
+                          className="min-h-32 resize-y font-sans"
+                          disabled={isInjectingCi}
+                        />
+                      </div>
                       <div className="grid gap-3 sm:grid-cols-2">
-                        <Input
-                          value={ciTargetUrl}
-                          onChange={(e) => setCiTargetUrl(e.target.value)}
-                          placeholder="Target URL to inject (e.g. https://americanplumbing.com)"
-                          disabled={isInjectingCi}
-                        />
-                        <Input
-                          value={ciAnchor}
-                          onChange={(e) => setCiAnchor(e.target.value)}
-                          placeholder="Anchor text (optional)"
-                          disabled={isInjectingCi}
-                        />
+                        <div className="flex flex-col gap-1.5">
+                          <Label>Target URL</Label>
+                          <Input
+                            value={ciTargetUrl}
+                            onChange={(e) => setCiTargetUrl(e.target.value)}
+                            placeholder="e.g. https://americanplumbing.com"
+                            disabled={isInjectingCi}
+                          />
+                        </div>
+                        <div className="flex flex-col gap-1.5">
+                          <Label>Anchor text</Label>
+                          <Input
+                            value={ciAnchor}
+                            onChange={(e) => setCiAnchor(e.target.value)}
+                            placeholder="Optional"
+                            disabled={isInjectingCi}
+                          />
+                        </div>
                       </div>
                       <Button
                         type="submit"
@@ -1595,9 +1702,10 @@ export function ChatPage() {
 
         {/* ── Tab 4: Chat ───────────────────────────────────────────────── */}
         <TabsContent value="chat" className="mt-0 flex flex-1">
-          {/* Conversation sidebar — only visible in Chat tab */}
+          {/* Conversation sidebar */}
           <div className="w-64 border-r border-border bg-card/50 flex flex-col shrink-0">
-            <div className="p-4 border-b border-border">
+            {/* Header */}
+            <div className="p-3 border-b border-border space-y-2">
               <Button
                 className="w-full gap-2"
                 onClick={handleNewConversation}
@@ -1607,33 +1715,83 @@ export function ChatPage() {
                 <Plus className="w-4 h-4" />
                 New Conversation
               </Button>
+
+              {conversations.length > 0 && (
+                <div className="flex items-center justify-between px-1">
+                  <span className="text-xs text-muted-foreground">
+                    {conversations.length} conversation{conversations.length !== 1 ? "s" : ""}
+                  </span>
+                  {clearAllConfirm ? (
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs text-destructive">Sure?</span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-5 px-1.5 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
+                        onClick={handleClearAll}
+                      >
+                        Yes
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-5 px-1.5 text-xs text-muted-foreground"
+                        onClick={() => setClearAllConfirm(false)}
+                      >
+                        No
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-5 px-1.5 text-xs text-muted-foreground hover:text-destructive"
+                      onClick={handleClearAll}
+                    >
+                      Clear all
+                    </Button>
+                  )}
+                </div>
+              )}
             </div>
+
+            {/* Conversation list */}
             <ScrollArea className="flex-1">
-              <div className="p-2 space-y-1">
+              <div className="p-2 space-y-0.5">
                 {loadingConversations ? (
                   <div className="p-4 text-center text-sm text-muted-foreground">Loading...</div>
                 ) : conversations.length === 0 ? (
-                  <div className="p-4 text-center text-sm text-muted-foreground">No conversations yet</div>
+                  <div className="p-6 text-center text-sm text-muted-foreground">
+                    <TerminalSquare className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                    No conversations yet
+                  </div>
                 ) : (
                   conversations.map(conv => (
                     <div
                       key={conv.id}
-                      onClick={() => setActiveId(conv.id)}
+                      onClick={() => { setActiveId(conv.id); setActiveView("chat"); }}
                       className={cn(
-                        "flex items-center justify-between p-3 rounded-md cursor-pointer transition-colors group text-sm",
+                        "flex items-start justify-between p-2.5 rounded-md cursor-pointer transition-colors group",
                         activeId === conv.id
                           ? "bg-secondary text-foreground"
                           : "text-muted-foreground hover:bg-secondary/50 hover:text-foreground"
                       )}
                       data-testid={`conv-item-${conv.id}`}
                     >
-                      <div className="truncate pr-2 flex-1">
-                        {conv.title || "Untitled Conversation"}
+                      <div className="flex-1 min-w-0 pr-1">
+                        <p className="text-sm truncate font-medium leading-snug">
+                          {conv.title || "Untitled"}
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {conv.messageCount ?? 0} message{(conv.messageCount ?? 0) !== 1 ? "s" : ""}
+                          {" · "}
+                          {new Date(conv.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                        </p>
                       </div>
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="opacity-0 group-hover:opacity-100 h-6 w-6 text-muted-foreground hover:text-destructive shrink-0"
+                        className="opacity-0 group-hover:opacity-100 h-6 w-6 shrink-0 text-muted-foreground hover:text-destructive mt-0.5"
                         onClick={(e) => handleDelete(conv.id, e)}
                       >
                         <Trash2 className="w-3 h-3" />

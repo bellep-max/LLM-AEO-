@@ -7,6 +7,7 @@ import { Layout } from "@/components/layout";
 import { ChatPage } from "@/pages/chat";
 import { DashboardPage } from "@/pages/dashboard";
 import { BackendPage } from "@/pages/backend";
+import { HistoryProvider } from "@/contexts/history-context";
 
 const queryClient = new QueryClient();
 
@@ -27,10 +28,12 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-          <Router />
-        </WouterRouter>
-        <Toaster />
+        <HistoryProvider>
+          <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+            <Router />
+          </WouterRouter>
+          <Toaster />
+        </HistoryProvider>
       </TooltipProvider>
     </QueryClientProvider>
   );
