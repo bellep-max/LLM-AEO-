@@ -1956,7 +1956,7 @@ export function ChatPage() {
               {!activeId && messages.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-muted-foreground opacity-50">
                   <TerminalSquare className="w-12 h-12 mb-4" />
-                  <p>Ready for input.</p>
+                  <p>I am your Signal AEO Assistant.</p>
                 </div>
               ) : (
                 <>
@@ -2011,7 +2011,7 @@ export function ChatPage() {
                 <Input
                   value={input}
                   onChange={e => setInput(e.target.value)}
-                  placeholder="Ask the AEO model a question..."
+                  placeholder="Ask Signal AEO Assistant anything..."
                   className="pr-12 bg-card border-muted focus-visible:ring-primary/50"
                   disabled={isStreaming}
                 />
