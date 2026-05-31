@@ -21,6 +21,7 @@
     "pino": "^9.14.0",
     "pino-http": "^10.5.0",
     "js-yaml": "^4.1.1",
+    "langfuse": "^3.0.0",
     "openai": "^4.0.0"
   },
   "devDependencies": {

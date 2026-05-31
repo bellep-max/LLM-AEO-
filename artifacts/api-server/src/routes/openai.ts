@@ -59,6 +59,61 @@ function extractJson(raw: string): unknown {
 let openai: import("openai").OpenAI | null = null;
 let openAIFallback: import("openai").OpenAI | null = null;
 
+// ── Langfuse tracing ───────────────────────────────────────────────────────────
+let langfuseClient: import("langfuse").Langfuse | null = null;
+let langfuseChecked = false;
+
+async function getLangfuse(): Promise<import("langfuse").Langfuse | null> {
+  if (langfuseChecked) return langfuseClient;
+  langfuseChecked = true;
+  if (!process.env.LANGFUSE_PUBLIC_KEY || !process.env.LANGFUSE_SECRET_KEY) return null;
+  try {
+    const { default: Langfuse } = await import("langfuse");
+    langfuseClient = new Langfuse();
+    return langfuseClient;
+  } catch {
+    return null;
+  }
+}
+
+type TraceOpts = {
+  name: string;
+  input: Record<string, unknown>;
+  output: unknown;
+  model: string;
+  messages: { role: string; content: string }[];
+  responseContent: string;
+  usage: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | null | undefined;
+  startTime: number;
+};
+
+async function recordTrace(opts: TraceOpts): Promise<string | null> {
+  const lf = await getLangfuse();
+  if (!lf) return null;
+  const trace = lf.trace({
+    name: opts.name,
+    input: opts.input,
+    output: opts.output,
+    metadata: { model: opts.model },
+  });
+  trace.generation({
+    name: "completion",
+    model: opts.model,
+    input: opts.messages,
+    output: opts.responseContent,
+    startTime: new Date(opts.startTime),
+    endTime: new Date(),
+    usage: {
+      promptTokens: opts.usage?.prompt_tokens,
+      completionTokens: opts.usage?.completion_tokens,
+      totalTokens: opts.usage?.total_tokens,
+    },
+  });
+  lf.flushAsync().catch((e) => console.error("[langfuse] flush error", e));
+  const base = process.env.LANGFUSE_BASEURL || process.env.LANGFUSE_HOST || "https://cloud.langfuse.com";
+  return `${base}/trace/${trace.id}`;
+}
+
 async function getOpenAIClient(): Promise<import("openai").OpenAI> {
   if (openai) return openai;
   if (!process.env.AI_INTEGRATIONS_OPENAI_BASE_URL || !process.env.AI_INTEGRATIONS_OPENAI_API_KEY) {
@@ -226,6 +281,11 @@ router.get("/openai/conversations/:id", async (req, res) => {
   });
 });
 
+router.delete("/openai/conversations", async (_req, res) => {
+  await db.delete(conversations);
+  res.status(204).end();
+});
+
 router.delete("/openai/conversations/:id", async (req, res) => {
   const { id } = DeleteOpenaiConversationParams.parse(req.params);
 
@@ -366,16 +426,30 @@ router.post("/openai/business-analysis", async (req, res) => {
       return;
     }
 
+    const traceUrl = await recordTrace({
+      name: "business-analysis",
+      input: { businessName, description },
+      output: data,
+      model: completion._model_used ?? CHAT_MODEL,
+      messages: [
+        { role: "system", content: "You are a senior AEO strategist. Return only valid JSON, no markdown." },
+        { role: "user",   content: buildAnalysisPrompt(businessName, description) },
+      ],
+      responseContent: completion.choices[0]?.message?.content ?? "",
+      usage: completion.usage,
+      startTime,
+    });
+
     await db.insert(backendLogs).values({
       event: "business_analysis",
       model: CHAT_MODEL,
       tokensUsed: completion.usage?.total_tokens ?? null,
       responseTimeMs: Date.now() - startTime,
       status: "success",
-      details: null,
+      details: traceUrl,
     });
 
-    res.json({ data, tokens_used: completion.usage?.total_tokens ?? 0, trace_url: null });
+    res.json({ data, tokens_used: completion.usage?.total_tokens ?? 0, trace_url: traceUrl });
   } catch (err) {
     res.status(502).json({ error: err instanceof Error ? err.message : "Business analysis failed" });
   }
@@ -521,19 +595,33 @@ router.post("/openai/business-audit", async (req, res) => {
       return;
     }
 
+    const traceUrl = await recordTrace({
+      name: "business-audit",
+      input: { businessDescription, businessSize, businessType, competitorDensity },
+      output: data,
+      model: completion._model_used ?? CHAT_MODEL,
+      messages: [
+        { role: "system", content: "You are a senior AEO strategist. Return only valid JSON, no markdown." },
+        { role: "user",   content: buildAuditPrompt(businessDescription, businessSize, businessType, competitorDensity) },
+      ],
+      responseContent: completion.choices[0]?.message?.content ?? "",
+      usage: completion.usage,
+      startTime,
+    });
+
     await db.insert(backendLogs).values({
       event: "business_audit",
       model: CHAT_MODEL,
       tokensUsed: completion.usage?.total_tokens ?? null,
       responseTimeMs: Date.now() - startTime,
       status: "success",
-      details: null,
+      details: traceUrl,
     });
 
     res.json({
       data,
       tokens_used: completion.usage?.total_tokens ?? 0,
-      trace_url: null,
+      trace_url: traceUrl,
     });
   } catch (err) {
     res.status(502).json({ error: err instanceof Error ? err.message : "Business audit failed" });
@@ -642,16 +730,30 @@ router.post("/openai/generate-backlinks", async (req, res) => {
     try { data = extractJson(completion.choices[0]?.message?.content ?? ""); }
     catch (parseErr) { res.status(502).json({ error: `LLM returned non-JSON: ${(parseErr as Error).message}` }); return; }
 
-    await db.insert(backendLogs).values({  // generate-backlinks
+    const traceUrl = await recordTrace({
+      name: "generate-backlinks",
+      input: { businessType, targetKeyword, targetUrl, competitorUrls },
+      output: data,
+      model: completion._model_used ?? CHAT_MODEL,
+      messages: [
+        { role: "system", content: "You are an expert SEO strategist. Output ONLY valid JSON. No text outside the JSON object." },
+        { role: "user",   content: buildBacklinksPrompt(businessType, targetKeyword, targetUrl, competitorUrls) },
+      ],
+      responseContent: completion.choices[0]?.message?.content ?? "",
+      usage: completion.usage,
+      startTime,
+    });
+
+    await db.insert(backendLogs).values({
       event: "generate_backlinks",
       model: CHAT_MODEL,
       tokensUsed: completion.usage?.total_tokens ?? null,
       responseTimeMs: Date.now() - startTime,
       status: "success",
-      details: null,
+      details: traceUrl,
     });
 
-    res.json({ data, tokens_used: completion.usage?.total_tokens ?? 0, trace_url: null });
+    res.json({ data, tokens_used: completion.usage?.total_tokens ?? 0, trace_url: traceUrl });
   } catch (err) {
     res.status(502).json({ error: err instanceof Error ? err.message : "Backlinks generation failed" });
   }
@@ -748,16 +850,30 @@ router.post("/openai/generate-link-prospects", async (req, res) => {
     try { data = extractJson(completion.choices[0]?.message?.content ?? ""); }
     catch (parseErr) { res.status(502).json({ error: `LLM returned non-JSON: ${(parseErr as Error).message}` }); return; }
 
+    const traceUrl = await recordTrace({
+      name: "generate-link-prospects",
+      input: { targetKeyword, targetUrl },
+      output: data,
+      model: completion._model_used ?? CHAT_MODEL,
+      messages: [
+        { role: "system", content: "You are a top-tier SEO strategist. Output ONLY valid JSON. No text outside the JSON object." },
+        { role: "user",   content: buildLinkProspectsPrompt(targetKeyword, targetUrl) },
+      ],
+      responseContent: completion.choices[0]?.message?.content ?? "",
+      usage: completion.usage,
+      startTime,
+    });
+
     await db.insert(backendLogs).values({
       event: "generate_link_prospects",
       model: CHAT_MODEL,
       tokensUsed: completion.usage?.total_tokens ?? null,
       responseTimeMs: Date.now() - startTime,
       status: "success",
-      details: null,
+      details: traceUrl,
     });
 
-    res.json({ data, tokens_used: completion.usage?.total_tokens ?? 0, trace_url: null });
+    res.json({ data, tokens_used: completion.usage?.total_tokens ?? 0, trace_url: traceUrl });
   } catch (err) {
     res.status(502).json({ error: err instanceof Error ? err.message : "Link prospects generation failed" });
   }
@@ -828,16 +944,30 @@ Output ONLY the content itself. No labels. No JSON. No explanation. Just the tex
 
     const content = (completion.choices[0]?.message?.content ?? "").trim();
 
+    const traceUrl = await recordTrace({
+      name: "generate-backlink-content",
+      input: { platformType, targetUrl, topic, anchorText, writingStyle },
+      output: content,
+      model: completion._model_used ?? CHAT_MODEL,
+      messages: [
+        { role: "system", content: "You are a human copywriter. Output only the content itself — no labels, no JSON, no markdown." },
+        { role: "user",   content: `Platform: ${platformType}\nTarget URL: ${targetUrl}\nTopic: ${topic}` },
+      ],
+      responseContent: content,
+      usage: completion.usage,
+      startTime,
+    });
+
     await db.insert(backendLogs).values({
       event: "generate_backlink_content",
       model: CHAT_MODEL,
       tokensUsed: completion.usage?.total_tokens ?? null,
       responseTimeMs: Date.now() - startTime,
       status: "success",
-      details: null,
+      details: traceUrl,
     });
 
-    res.json({ content, tokens_used: completion.usage?.total_tokens ?? 0, trace_url: null });
+    res.json({ content, tokens_used: completion.usage?.total_tokens ?? 0, trace_url: traceUrl });
   } catch (err) {
     res.status(502).json({ error: err instanceof Error ? err.message : "Content generation failed" });
   }
@@ -888,16 +1018,30 @@ Output ONLY the modified content.`;
 
     const content = (completion.choices[0]?.message?.content ?? "").trim();
 
+    const traceUrl = await recordTrace({
+      name: "inject-backlink-content",
+      input: { platformType, targetUrl, anchorText },
+      output: content,
+      model: completion._model_used ?? CHAT_MODEL,
+      messages: [
+        { role: "system", content: "You are a human copywriter. Output only the modified content — no labels, no JSON, no markdown." },
+        { role: "user",   content: `Inject URL: ${targetUrl} into existing content` },
+      ],
+      responseContent: content,
+      usage: completion.usage,
+      startTime,
+    });
+
     await db.insert(backendLogs).values({
       event: "inject_backlink_content",
       model: CHAT_MODEL,
       tokensUsed: completion.usage?.total_tokens ?? null,
       responseTimeMs: Date.now() - startTime,
       status: "success",
-      details: null,
+      details: traceUrl,
     });
 
-    res.json({ content, tokens_used: completion.usage?.total_tokens ?? 0, trace_url: null });
+    res.json({ content, tokens_used: completion.usage?.total_tokens ?? 0, trace_url: traceUrl });
   } catch (err) {
     res.status(502).json({ error: err instanceof Error ? err.message : "Backlink injection failed" });
   }
@@ -996,6 +1140,17 @@ router.post("/openai/conversations/:id/messages", async (req, res) => {
 
   const responseTimeMs = Date.now() - startTime;
 
+  const chatTraceUrl = await recordTrace({
+    name: "chat-completion",
+    input: { conversationId: id, userMessage: parsed.data.content },
+    output: fullResponse,
+    model: CHAT_MODEL,
+    messages: chatMessages,
+    responseContent: fullResponse,
+    usage: totalTokens ? { total_tokens: totalTokens } : null,
+    startTime,
+  });
+
   await db.insert(messages).values({
     conversationId: id,
     role: "assistant",
@@ -1011,7 +1166,7 @@ router.post("/openai/conversations/:id/messages", async (req, res) => {
     tokensUsed: totalTokens || null,
     responseTimeMs,
     status: logStatus,
-    details: logDetails,
+    details: chatTraceUrl ?? logDetails,
   });
 
   res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
