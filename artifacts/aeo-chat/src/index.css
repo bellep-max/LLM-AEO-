@@ -66,7 +66,53 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
-:root, .dark {
+:root {
+  --button-outline: rgba(0,0,0, .10);
+  --badge-outline: rgba(0,0,0, .05);
+  --opaque-button-border-intensity: 9;
+  --elevate-1: rgba(0,0,0, .04);
+  --elevate-2: rgba(0,0,0, .09);
+
+  --background: 0 0% 100%;
+  --foreground: 240 10% 7%;
+  --border: 240 5% 90%;
+  --card: 0 0% 96%;
+  --card-foreground: 240 10% 7%;
+  --card-border: 240 5% 85%;
+  
+  --sidebar: 240 10% 97%;
+  --sidebar-foreground: 240 5% 40%;
+  --sidebar-border: 240 5% 85%;
+  --sidebar-primary: 217 91% 60%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 240 5% 85%;
+  --sidebar-accent-foreground: 240 10% 15%;
+  --sidebar-ring: 217 91% 60%;
+
+  --popover: 0 0% 100%;
+  --popover-foreground: 240 10% 7%;
+  --popover-border: 240 5% 85%;
+
+  --primary: 217 91% 60%;
+  --primary-foreground: 0 0% 100%;
+
+  --secondary: 240 5% 85%;
+  --secondary-foreground: 240 10% 10%;
+
+  --muted: 240 5% 85%;
+  --muted-foreground: 240 5% 45%;
+
+  --accent: 240 5% 85%;
+  --accent-foreground: 240 10% 10%;
+
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 100%;
+
+  --input: 240 5% 90%;
+  --ring: 217 91% 60%;
+}
+
+.dark {
   --button-outline: rgba(255,255,255, .10);
   --badge-outline: rgba(255,255,255, .05);
   --opaque-button-border-intensity: 9;

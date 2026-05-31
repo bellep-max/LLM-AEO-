@@ -6,6 +6,8 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface OpenaiMessageInput {
-  content: string;
+export interface RotationTriggerResponse {
+  status: string;
+  cluster: string;
+  message: string;
 }

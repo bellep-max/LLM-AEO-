@@ -6,6 +6,4 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface OpenaiMessageInput {
-  content: string;
-}
+export type InjectClusterInputBacklinksItem = { [key: string]: unknown };

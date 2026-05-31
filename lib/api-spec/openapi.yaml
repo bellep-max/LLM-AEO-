@@ -16,6 +16,8 @@ tags:
     description: AEO analytics and dashboard operations
   - name: backend-logs
     description: Backend activity and LLM call logs
+  - name: keyword-rotation
+    description: AEO keyword rotation monitoring and control
 paths:
   /healthz:
     get:
@@ -206,6 +208,70 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/BackendLog"
+
+  /keyword-rotation/inject-cluster:
+    post:
+      operationId: injectKeywordCluster
+      tags: [keyword-rotation]
+      summary: Inject business analysis keywords into the rotation system
+      description: >
+        Takes keywords produced by the AEO business analysis and writes them as
+        a named cluster in keyword_clusters.yaml. Existing locked keywords are
+        preserved. New keywords start at score 0.0 and are immediately queued
+        for the next rotation cycle.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InjectClusterInput"
+      responses:
+        "200":
+          description: Cluster written successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InjectClusterResponse"
+
+  /keyword-rotation/status:
+    get:
+      operationId: getKeywordRotationStatus
+      tags: [keyword-rotation]
+      summary: Get current keyword visibility scores and rotation state
+      description: >
+        Returns all keyword clusters with their current AEO visibility scores,
+        lock status, days idle, and rotation priority. Powered by the Python
+        keyword rotation engine (DeepSeek + Langfuse).
+      responses:
+        "200":
+          description: Keyword rotation status for all clusters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KeywordRotationStatus"
+
+  /keyword-rotation/run:
+    post:
+      operationId: triggerKeywordRotation
+      tags: [keyword-rotation]
+      summary: Trigger a keyword rotation cycle
+      description: >
+        Starts a background keyword rotation run. Optionally scoped to a single
+        cluster. Poll /keyword-rotation/status for updated scores after the cycle
+        completes (typically 30–120 seconds).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RotationTriggerInput"
+      responses:
+        "200":
+          description: Rotation job accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RotationTriggerResponse"
 
 components:
   schemas:
@@ -402,3 +468,128 @@ components:
         - responseTimeMs
         - status
         - details
+
+    KeywordItem:
+      type: object
+      properties:
+        keyword:
+          type: string
+        brand:
+          type: string
+        locked:
+          type: boolean
+        last_score:
+          type: number
+        days_idle:
+          type: integer
+        consecutive_top:
+          type: integer
+        rotation_priority:
+          type: number
+      required:
+        - keyword
+        - brand
+        - locked
+        - last_score
+        - days_idle
+        - consecutive_top
+        - rotation_priority
+
+    KeywordCluster:
+      type: object
+      properties:
+        cluster:
+          type: string
+        keywords:
+          type: array
+          items:
+            $ref: "#/components/schemas/KeywordItem"
+        locked_count:
+          type: integer
+        total_count:
+          type: integer
+      required:
+        - cluster
+        - keywords
+        - locked_count
+        - total_count
+
+    KeywordRotationStatus:
+      type: object
+      properties:
+        clusters:
+          type: array
+          items:
+            $ref: "#/components/schemas/KeywordCluster"
+        last_updated:
+          type: ["string", "null"]
+      required:
+        - clusters
+        - last_updated
+
+    RotationTriggerInput:
+      type: object
+      properties:
+        cluster:
+          type: ["string", "null"]
+      required: []
+
+    RotationTriggerResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        cluster:
+          type: string
+        message:
+          type: string
+      required:
+        - status
+        - cluster
+        - message
+
+    InjectKeywordItem:
+      type: object
+      properties:
+        keyword:
+          type: string
+        ground_truth:
+          type: string
+      required:
+        - keyword
+        - ground_truth
+
+    InjectClusterInput:
+      type: object
+      properties:
+        business_name:
+          type: string
+        brand:
+          type: string
+        keywords:
+          type: array
+          items:
+            $ref: "#/components/schemas/InjectKeywordItem"
+        backlinks:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+      required:
+        - business_name
+        - brand
+        - keywords
+
+    InjectClusterResponse:
+      type: object
+      properties:
+        cluster:
+          type: string
+        keyword_count:
+          type: integer
+        message:
+          type: string
+      required:
+        - cluster
+        - keyword_count
+        - message

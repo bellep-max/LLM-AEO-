@@ -6,6 +6,8 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface OpenaiMessageInput {
-  content: string;
+export interface InjectClusterResponse {
+  cluster: string;
+  keyword_count: number;
+  message: string;
 }
