@@ -72,7 +72,7 @@ async function getLangfuse(): Promise<import("langfuse").Langfuse | null> {
     langfuseClient = new Langfuse({
       publicKey: process.env.LANGFUSE_PUBLIC_KEY,
       secretKey: process.env.LANGFUSE_SECRET_KEY,
-      baseUrl: process.env.LANGFUSE_HOST || process.env.LANGFUSE_BASEURL || "https://us.cloud.langfuse.com",
+      baseUrl: process.env.LANGFUSE_BASE_URL || process.env.LANGFUSE_HOST || process.env.LANGFUSE_BASEURL || "https://us.cloud.langfuse.com",
     });
     return langfuseClient;
   } catch {
@@ -114,7 +114,7 @@ async function recordTrace(opts: TraceOpts): Promise<string | null> {
     },
   });
   await lf.flushAsync();
-  const base = process.env.LANGFUSE_HOST || process.env.LANGFUSE_BASEURL || "https://us.cloud.langfuse.com";
+  const base = process.env.LANGFUSE_BASE_URL || process.env.LANGFUSE_HOST || process.env.LANGFUSE_BASEURL || "https://us.cloud.langfuse.com";
   return `${base}/trace/${trace.id}`;
 }
 
