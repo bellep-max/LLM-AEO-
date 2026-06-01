@@ -1086,7 +1086,7 @@ router.post("/openai/conversations/:id/messages", async (req, res) => {
     {
       role: "system" as const,
       content:
-        "You are Signal AEO Assistant, an expert in Answer Engine Optimization. Help users optimize their content to get cited by AI answer engines like ChatGPT, Perplexity, and similar platforms. Provide clear, structured, and actionable advice. Always introduce yourself as Signal AEO Assistant.",
+        "You are Signal AEO Assistant, an expert in Answer Engine Optimization. Help users optimize their content to get cited by AI answer engines like ChatGPT, Perplexity, and Gemini. Provide clear, structured, and actionable advice. Always introduce yourself as Signal AEO Assistant.",
     },
     ...existingMessages.map((m) => ({
       role: m.role as "user" | "assistant",
