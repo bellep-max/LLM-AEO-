@@ -113,7 +113,7 @@ async function recordTrace(opts: TraceOpts): Promise<string | null> {
       totalTokens: opts.usage?.total_tokens,
     },
   });
-  lf.flushAsync().catch((e) => console.error("[langfuse] flush error", e));
+  await lf.flushAsync();
   const base = process.env.LANGFUSE_HOST || process.env.LANGFUSE_BASEURL || "https://us.cloud.langfuse.com";
   return `${base}/trace/${trace.id}`;
 }
