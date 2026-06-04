@@ -7,6 +7,7 @@ import { Layout } from "@/components/layout";
 import { ChatPage } from "@/pages/chat";
 import { DashboardPage } from "@/pages/dashboard";
 import { BackendPage } from "@/pages/backend";
+import { KeywordRotationPage } from "@/pages/keyword-rotation";
 import { HistoryProvider } from "@/contexts/history-context";
 
 const queryClient = new QueryClient();
@@ -17,6 +18,7 @@ function Router() {
       <Switch>
         <Route path="/" component={ChatPage} />
         <Route path="/dashboard" component={DashboardPage} />
+        <Route path="/keyword-rotation" component={KeywordRotationPage} />
         <Route path="/backend" component={BackendPage} />
         <Route component={NotFound} />
       </Switch>

@@ -1,7 +1,82 @@
 import { Router } from "express";
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from "fs";
 import { join, dirname } from "path";
 import yaml from "js-yaml";
+
+// ── Ranking-based rotation (automation/keyword_rotation.py output) ─────────────
+// Works whether the server is started from the repo root OR from artifacts/api-server/
+const _repoRoot =
+  existsSync(join(process.cwd(), "automation"))
+    ? process.cwd()
+    : join(process.cwd(), "../..");
+const AUTOMATION_DIR   = join(_repoRoot, "automation");
+const RANKING_STATE    = join(AUTOMATION_DIR, "rotation_state.json");
+const RANKING_KEYWORDS = join(AUTOMATION_DIR, "keywords.json");
+const RANKING_LOGS_DIR = join(AUTOMATION_DIR, "logs");
+
+function loadRankingStatus() {
+  // Load keywords.json (fixed keyword list)
+  let keywordConfigs: { keyword: string; priority: number }[] = [];
+  if (existsSync(RANKING_KEYWORDS)) {
+    const raw = JSON.parse(readFileSync(RANKING_KEYWORDS, "utf8"));
+    keywordConfigs = (raw.keywords ?? []).map((k: Record<string, unknown>) => ({
+      keyword:  k.keyword as string,
+      priority: (k.priority as number) ?? 1,
+    }));
+  }
+
+  // Load rotation_state.json (lock state)
+  let state: Record<string, { locked: boolean; locked_since: string | null }> = {};
+  if (existsSync(RANKING_STATE)) {
+    state = JSON.parse(readFileSync(RANKING_STATE, "utf8"));
+  }
+
+  // Find the latest content log file
+  let latestLog: Record<string, unknown> | null = null;
+  let lastRun: string | null = null;
+  if (existsSync(RANKING_LOGS_DIR)) {
+    const logs = readdirSync(RANKING_LOGS_DIR)
+      .filter((f) => f.startsWith("content_") && f.endsWith(".json"))
+      .sort()
+      .reverse();
+    if (logs.length > 0) {
+      const logPath = join(RANKING_LOGS_DIR, logs[0]);
+      latestLog = JSON.parse(readFileSync(logPath, "utf8"));
+      lastRun = (latestLog?.date as string) ?? null;
+    }
+  }
+
+  const summary = (latestLog?.keyword_summary ?? {}) as Record<
+    string,
+    { top3_days: number; top3_stability: number; current_rank: number | null; locked: boolean }
+  >;
+
+  const keywords = keywordConfigs.map((cfg) => {
+    const win     = summary[cfg.keyword];
+    const kstate  = state[cfg.keyword] ?? { locked: false, locked_since: null };
+    return {
+      keyword:        cfg.keyword,
+      priority:       cfg.priority,
+      locked:         kstate.locked || (win?.locked ?? false),
+      locked_since:   kstate.locked_since ?? null,
+      top3_days:      win?.top3_days    ?? null,
+      top3_stability: win?.top3_stability ?? null,
+      current_rank:   win?.current_rank ?? null,
+    };
+  });
+
+  const lockedCount = keywords.filter((k) => k.locked).length;
+
+  return {
+    last_run:           lastRun,
+    selected_keyword:   (latestLog?.selected_keyword as string) ?? null,
+    generated_content:  (latestLog?.content as string) ?? null,
+    keywords,
+    total_keywords:     keywords.length,
+    locked_count:       lockedCount,
+    active_count:       keywords.length - lockedCount,
+  };
+}
 
 const AEO_LLM_URL = process.env.AEO_LLM_URL || "http://localhost:8000";
 
@@ -142,6 +217,20 @@ router.post("/keyword-rotation/inject-cluster", async (req, res) => {
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: `Inject failed: ${message}` });
+  }
+});
+
+/**
+ * GET /keyword-rotation/ranking-status
+ * Returns ranking-API-based rotation state from automation/keyword_rotation.py output.
+ * Reads automation/rotation_state.json + latest automation/logs/content_YYYY-MM-DD.json.
+ */
+router.get("/keyword-rotation/ranking-status", (_req, res) => {
+  try {
+    res.json(loadRankingStatus());
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: `Failed to load ranking status: ${message}` });
   }
 });
 

@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { MessageSquare, LayoutDashboard, Terminal, ExternalLink, Trash2 } from "lucide-react";
+import { MessageSquare, LayoutDashboard, Terminal, ExternalLink, Trash2, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useHistory } from "@/contexts/history-context";
 import { format } from "date-fns";
@@ -20,6 +20,7 @@ export function Layout({ children }: LayoutProps) {
   const navItems = [
     { href: "/", label: "Chat", icon: MessageSquare },
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/keyword-rotation", label: "Keyword Rotation", icon: RotateCcw },
     { href: "/backend", label: "Backend Logs", icon: Terminal },
   ];
 
