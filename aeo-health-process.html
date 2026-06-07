@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AEO Daily Session Health — Process Guide</title>
+<style>
+  :root {
+    --green:  #10b981; --green-bg:  #f0fdf4; --green-border:  #86efac;
+    --amber:  #f59e0b; --amber-bg:  #fffbeb; --amber-border:  #fde68a;
+    --red:    #ef4444; --red-bg:    #fef2f2; --red-border:    #fecaca;
+    --blue:   #3b82f6; --blue-bg:   #eff6ff; --blue-border:   #bfdbfe;
+    --purple: #8b5cf6; --purple-bg: #f5f3ff; --purple-border: #ddd6fe;
+    --slate:  #64748b; --slate-bg:  #f8fafc; --slate-border:  #e2e8f0;
+    --gpt:    #10b981; --gem: #3b82f6; --perp: #8b5cf6;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    color: #111827; background: #fff; padding: 40px 48px; max-width: 1100px; margin: 0 auto;
+    font-size: 13px; line-height: 1.6;
+  }
+
+  /* ── Print ── */
+  @media print {
+    body { padding: 16px 20px; font-size: 11px; }
+    .no-print { display: none !important; }
+    .page-break { page-break-before: always; }
+    h2 { page-break-after: avoid; }
+  }
+
+  /* ── Typography ── */
+  h1 { font-size: 26px; font-weight: 800; margin-bottom: 6px; }
+  h2 { font-size: 16px; font-weight: 700; margin: 36px 0 14px; text-transform: uppercase;
+       letter-spacing: .05em; color: #374151; padding-bottom: 6px; border-bottom: 2px solid #e5e7eb; }
+  h3 { font-size: 13px; font-weight: 700; margin: 18px 0 8px; }
+  p  { margin-bottom: 10px; color: #374151; }
+  ul { padding-left: 20px; margin-bottom: 10px; }
+  li { margin-bottom: 4px; }
+  strong { color: #111827; }
+  .muted { color: #6b7280; font-size: 11px; }
+
+  /* ── Print button ── */
+  .print-btn {
+    float: right; padding: 8px 18px; background: #111827; color: #fff;
+    border: none; border-radius: 6px; font-size: 12px; font-weight: 600;
+    cursor: pointer; margin-top: 4px;
+  }
+
+  /* ── Header meta ── */
+  .header-meta { font-size: 12px; color: #6b7280; margin-bottom: 32px; }
+  .header-meta span { margin-right: 20px; }
+
+  /* ── Callout boxes ── */
+  .callout {
+    border-radius: 8px; padding: 14px 18px; margin-bottom: 16px;
+    border-left: 4px solid; font-size: 12px;
+  }
+  .callout.green  { background: var(--green-bg);  border-color: var(--green);  }
+  .callout.amber  { background: var(--amber-bg);  border-color: var(--amber);  }
+  .callout.red    { background: var(--red-bg);    border-color: var(--red);    }
+  .callout.blue   { background: var(--blue-bg);   border-color: var(--blue);   }
+  .callout.purple { background: var(--purple-bg); border-color: var(--purple); }
+  .callout.slate  { background: var(--slate-bg);  border-color: var(--slate);  }
+  .callout-title  { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+
+  /* ── Criteria grid ── */
+  .criteria-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 20px; }
+  .criteria-card {
+    border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px;
+    background: #fafafa;
+  }
+  .criteria-card .icon { font-size: 22px; margin-bottom: 8px; }
+  .criteria-card h3 { margin-top: 0; color: #111827; }
+  .threshold-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; font-size: 11px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .dot.green  { background: var(--green); }
+  .dot.amber  { background: var(--amber); }
+  .dot.red    { background: var(--red);   }
+
+  /* ── Prediction states ── */
+  .pred-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+  .pred-card {
+    border-radius: 10px; border: 2px solid; padding: 14px;
+    text-align: center;
+  }
+  .pred-card .emoji { font-size: 28px; margin-bottom: 6px; }
+  .pred-card .label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+  .pred-card .desc  { font-size: 10px; margin-top: 4px; color: #6b7280; line-height: 1.4; }
+  .pred-card.on-track  { background: #f0fdf4; border-color: #86efac; }
+  .pred-card.at-risk   { background: var(--blue-bg); border-color: var(--blue-border); }
+  .pred-card.stable    { background: var(--amber-bg); border-color: var(--amber-border); }
+  .pred-card.too-early { background: var(--slate-bg); border-color: var(--slate-border); }
+
+  /* ── 4-week flow ── */
+  .week-flow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; margin-bottom: 20px; position: relative; }
+  .week-card {
+    border: 1px solid #e5e7eb; padding: 16px 14px; position: relative;
+    background: #fff;
+  }
+  .week-card:first-child { border-radius: 10px 0 0 10px; }
+  .week-card:last-child  { border-radius: 0 10px 10px 0; }
+  .week-card + .week-card { border-left: none; }
+  .week-card .week-num {
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+    color: #6b7280; margin-bottom: 6px;
+  }
+  .week-card h3 { font-size: 12px; margin: 0 0 8px; color: #111827; }
+  .week-card ul { font-size: 11px; padding-left: 16px; }
+  .week-card ul li { margin-bottom: 3px; color: #374151; }
+  .week-card.w1 { border-top: 3px solid #3b82f6; }
+  .week-card.w2 { border-top: 3px solid #8b5cf6; }
+  .week-card.w3 { border-top: 3px solid #f59e0b; }
+  .week-card.w4 { border-top: 3px solid #10b981; }
+
+  /* ── Platform table ── */
+  .plat-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 11px; }
+  .plat-table th { background: #f9fafb; padding: 9px 12px; text-align: left; font-size: 10px;
+                   font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+                   color: #6b7280; border-bottom: 2px solid #e5e7eb; }
+  .plat-table td { padding: 9px 12px; border-bottom: 1px solid #f3f4f6; vertical-align: top; }
+  .plat-table tr:last-child td { border-bottom: none; }
+  .plat-badge {
+    display: inline-block; padding: 2px 8px; border-radius: 20px;
+    font-size: 10px; font-weight: 700; border: 1px solid;
+  }
+  .plat-badge.gpt  { background: #d1fae5; color: #065f46; border-color: #6ee7b7; }
+  .plat-badge.gem  { background: #dbeafe; color: #1e40af; border-color: #93c5fd; }
+  .plat-badge.perp { background: #ede9fe; color: #4c1d95; border-color: #c4b5fd; }
+
+  /* ── Signal flow diagram ── */
+  .signal-flow { display: flex; align-items: stretch; gap: 0; margin-bottom: 20px; }
+  .signal-node {
+    flex: 1; padding: 14px 12px; border: 1px solid #e5e7eb;
+    font-size: 11px; text-align: center; background: #fafafa;
+  }
+  .signal-node:first-child { border-radius: 8px 0 0 8px; }
+  .signal-node:last-child  { border-radius: 0 8px 8px 0; }
+  .signal-node + .signal-node { border-left: none; }
+  .signal-node .sn-icon  { font-size: 20px; margin-bottom: 6px; }
+  .signal-node .sn-title { font-weight: 700; font-size: 11px; margin-bottom: 4px; color: #111827; }
+  .signal-node .sn-desc  { font-size: 10px; color: #6b7280; line-height: 1.4; }
+  .signal-arrow { display: flex; align-items: center; padding: 0 4px; color: #9ca3af; font-size: 18px; flex-shrink: 0; }
+
+  /* ── Action table ── */
+  .action-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 11px; }
+  .action-table th { background: #f9fafb; padding: 9px 12px; text-align: left; font-size: 10px;
+                     font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+                     color: #6b7280; border-bottom: 2px solid #e5e7eb; }
+  .action-table td { padding: 9px 12px; border-bottom: 1px solid #f3f4f6; vertical-align: top; }
+  .action-table tr:last-child td { border-bottom: none; }
+  .badge {
+    display: inline-block; padding: 2px 7px; border-radius: 20px;
+    font-size: 10px; font-weight: 600; border: 1px solid;
+  }
+  .badge.green  { background: #d1fae5; color: #065f46; border-color: #6ee7b7; }
+  .badge.amber  { background: #fef3c7; color: #92400e; border-color: #fcd34d; }
+  .badge.red    { background: #fee2e2; color: #991b1b; border-color: #fca5a5; }
+  .badge.blue   { background: #dbeafe; color: #1e40af; border-color: #93c5fd; }
+  .badge.slate  { background: #f1f5f9; color: #475569; border-color: #cbd5e1; }
+
+  /* ── LLM training section ── */
+  .training-flow { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin-bottom: 20px; }
+  .training-card {
+    border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px;
+    background: #fafafa; font-size: 11px;
+  }
+  .training-card .step-num {
+    width: 24px; height: 24px; border-radius: 50%; background: #111827;
+    color: #fff; font-size: 11px; font-weight: 700; display: flex;
+    align-items: center; justify-content: center; margin-bottom: 8px;
+  }
+  .code-block {
+    background: #111827; color: #e2e8f0; padding: 10px 14px; border-radius: 6px;
+    font-family: 'Courier New', Courier, monospace; font-size: 10px;
+    line-height: 1.5; margin-top: 6px; overflow-x: auto;
+    white-space: pre;
+  }
+
+  /* ── Keyword coverage ── */
+  .kw-status { display: flex; gap: 3px; flex-wrap: wrap; }
+  .kw-pill {
+    padding: 2px 7px; border-radius: 20px; font-size: 10px; font-weight: 600;
+    border: 1px solid;
+  }
+  .kw-pill.ok       { background: #d1fae5; color: #065f46; border-color: #6ee7b7; }
+  .kw-pill.warn     { background: #fef3c7; color: #92400e; border-color: #fcd34d; }
+  .kw-pill.critical { background: #fee2e2; color: #991b1b; border-color: #fca5a5; }
+
+  /* ── Footer ── */
+  .footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid #e5e7eb;
+            font-size: 10px; color: #9ca3af; text-align: center; }
+</style>
+</head>
+<body>
+
+<button class="print-btn no-print" onclick="window.print()">⬇ Print / Save PDF</button>
+
+<h1>AEO Daily Session Health — Process Guide</h1>
+<div class="header-meta">
+  <span>📅 Signal AEO Dashboard</span>
+  <span>Platforms: ChatGPT · Gemini · Perplexity</span>
+  <span>Ranking cycle: bi-weekly (every 14 days)</span>
+</div>
+
+<!-- ══════════════════════════════════════════════════════ -->
+<h2>1. What Is Daily Session Health Monitoring?</h2>
+
+<div class="callout blue">
+  <div class="callout-title">📌 Core concept</div>
+  <p style="margin:0">AI answer engines (ChatGPT, Gemini, Perplexity) learn which businesses to recommend from <strong>real user query interactions</strong>. Every session your automation runs is one signal telling the engine "this business is relevant for this keyword in this city." Daily health monitoring tracks whether enough of those signals are being sent — consistently, across all keywords and all platforms — before the bi-weekly ranking run captures the result.</p>
+</div>
+
+<p>Without monitoring, you would only find out that sessions failed or keywords were missed <strong>after</strong> the ranking run drops. With daily health monitoring, you catch and fix problems with enough time to recover before the next measurement.</p>
+
+<!-- ══════════════════════════════════════════════════════ -->
+<h2>2. The 7 Health Criteria — What Gets Measured Every Day</h2>
+
+<div class="criteria-grid">
+
+  <div class="criteria-card">
+    <div class="icon">📊</div>
+    <h3>1 — Session Volume (Today vs. Target)</h3>
+    <p>Each campaign has a daily session target. The system compares actual sessions delivered to that target.</p>
+    <div class="threshold-row"><div class="dot green"></div><strong>✅ On track:</strong> &nbsp;≥ 80% of target</div>
+    <div class="threshold-row"><div class="dot amber"></div><strong>⚠️ Warning:</strong> &nbsp;40–79% of target</div>
+    <div class="threshold-row"><div class="dot red"></div><strong>🚨 Critical:</strong> &nbsp;&lt; 40% of target</div>
+    <p style="margin-top:8px;font-size:11px;color:#6b7280">
+      <strong>Why it matters:</strong> Engines need a minimum daily cadence of signals. A day at 30% volume is almost the same as a gap day — the signal is too weak to reinforce the previous day's work.
+    </p>
+  </div>
+
+  <div class="criteria-card">
+    <div class="icon">✅</div>
+    <h3>2 — Session Success Rate</h3>
+    <p>Of sessions delivered, what percentage actually completed and returned a valid rank result?</p>
+    <div class="threshold-row"><div class="dot green"></div><strong>✅ Healthy:</strong> &nbsp;≥ 90%</div>
+    <div class="threshold-row"><div class="dot amber"></div><strong>⚠️ Watch:</strong> &nbsp;70–89%</div>
+    <div class="threshold-row"><div class="dot red"></div><strong>🚨 Broken:</strong> &nbsp;&lt; 70%</div>
+    <p style="margin-top:8px;font-size:11px;color:#6b7280">
+      <strong>Why it matters:</strong> A failed session sends no signal. 100 sessions at 60% success = only 60 real signals. Low success rate often means proxy issues, platform rate-limiting, or prompt format problems.
+    </p>
+  </div>
+
+  <div class="criteria-card">
+    <div class="icon">📈</div>
+    <h3>3 — Rolling 7-Day Average</h3>
+    <p>The 7-day smoothed view of sessions/day and success rate. More reliable than a single day's snapshot.</p>
+    <div class="threshold-row"><div class="dot green"></div><strong>Avg sessions:</strong> &nbsp;≥ 80% of target/day</div>
+    <div class="threshold-row"><div class="dot green"></div><strong>Avg success:</strong> &nbsp;≥ 90%</div>
+    <div class="threshold-row"><div class="dot red"></div><strong>Gap days:</strong> &nbsp;Zero-session days tracked (last 7)</div>
+    <p style="margin-top:8px;font-size:11px;color:#6b7280">
+      <strong>Why it matters:</strong> One good day after 6 bad days still shows a weak 7-day average. Engines weigh recency AND consistency — the 7-day average is the closest proxy to what the engine "remembers."
+    </p>
+  </div>
+
+  <div class="criteria-card">
+    <div class="icon">🔑</div>
+    <h3>4 — Keyword Coverage</h3>
+    <p>Each keyword must be hit regularly. The system tracks how many days since each keyword last had a session.</p>
+    <div class="threshold-row"><div class="dot green"></div><strong>✅ OK:</strong> &nbsp;Hit today or yesterday</div>
+    <div class="threshold-row"><div class="dot amber"></div><strong>⚠️ Warning:</strong> &nbsp;3+ days since last hit</div>
+    <div class="threshold-row"><div class="dot red"></div><strong>🚨 Critical:</strong> &nbsp;5+ days since last hit</div>
+    <p style="margin-top:8px;font-size:11px;color:#6b7280">
+      <strong>Why it matters:</strong> A keyword with 5+ days of no signal is effectively cold. The engine may stop associating the business with that query. This is often the first visible cause of a ranking drop.
+    </p>
+  </div>
+
+  <div class="criteria-card">
+    <div class="icon">🔄</div>
+    <h3>5 — Platform Rotation Balance</h3>
+    <p>Sessions must be distributed across ChatGPT, Gemini, and Perplexity. Each platform is monitored independently.</p>
+    <div class="threshold-row"><div class="dot green"></div><strong>✅ Active:</strong> &nbsp;Sessions in last 3 days</div>
+    <div class="threshold-row"><div class="dot amber"></div><strong>⚠️ Warning:</strong> &nbsp;0 sessions in last 3 days</div>
+    <div class="threshold-row"><div class="dot red"></div><strong>🚨 Critical:</strong> &nbsp;0 sessions in 5+ consecutive days</div>
+    <p style="margin-top:8px;font-size:11px;color:#6b7280">
+      <strong>Why it matters:</strong> A business might rank well on ChatGPT but decline on Gemini if it never receives Gemini signals. Each platform has its own index — they don't share signals.
+    </p>
+  </div>
+
+  <div class="criteria-card">
+    <div class="icon">📅</div>
+    <h3>6 — Session Gap Days</h3>
+    <p>Any date in the last 7 with zero sessions is a "gap day." The system counts total gap days in the rolling window.</p>
+    <div class="threshold-row"><div class="dot green"></div><strong>✅ Clean:</strong> &nbsp;0 gap days</div>
+    <div class="threshold-row"><div class="dot amber"></div><strong>⚠️ Concern:</strong> &nbsp;1 gap day</div>
+    <div class="threshold-row"><div class="dot red"></div><strong>🚨 Risk:</strong> &nbsp;2+ gap days</div>
+    <p style="margin-top:8px;font-size:11px;color:#6b7280">
+      <strong>Why it matters:</strong> A gap day is not just one missed day — it breaks the continuity the engine expects. Two gap days in 7 means the business was "invisible" 28% of the week.
+    </p>
+  </div>
+
+  <div class="criteria-card" style="grid-column: 1 / -1;">
+    <div class="icon">🚨</div>
+    <h3>7 — Prediction for Next Ranking Run</h3>
+    <p>Combines all 6 criteria above into a single forward-looking prediction that tells you what the next bi-weekly ranking run is likely to show if nothing changes today.</p>
+    <div class="pred-grid" style="margin-top: 12px; margin-bottom: 0;">
+      <div class="pred-card on-track">
+        <div class="emoji">📈</div>
+        <div class="label" style="color:#065f46">On Track</div>
+        <div class="desc">Volume, success rate, keyword coverage, and all 3 platforms healthy. Expect ranking improvement or hold.</div>
+      </div>
+      <div class="pred-card at-risk">
+        <div class="emoji">🚨</div>
+        <div class="label" style="color:#1e40af">At Risk</div>
+        <div class="desc">One or more critical failures — gaps, low success, missed keywords 5+ days. Ranking drop probable.</div>
+      </div>
+      <div class="pred-card stable">
+        <div class="emoji">➡️</div>
+        <div class="label" style="color:#92400e">Stable</div>
+        <div class="desc">Borderline — not enough positive signals to be "On Track," not enough failures to be "At Risk." Watch closely.</div>
+      </div>
+      <div class="pred-card too-early">
+        <div class="emoji">⏳</div>
+        <div class="label" style="color:#475569">Too Early</div>
+        <div class="desc">Less than 7 days of session data. Cannot assess trends yet — establish baseline first.</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ══════════════════════════════════════════════════════ -->
+<h2>2. How Each Criterion Drives AEO Ranking Improvement</h2>
+
+<table class="action-table">
+  <thead>
+    <tr>
+      <th>Health Signal</th>
+      <th>What Breaks When It Fails</th>
+      <th>What You Do to Fix It</th>
+      <th>Impact on Ranking</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Session Volume below target</strong></td>
+      <td>Not enough daily reinforcement. Engine confidence in the business drops over the 14-day window.</td>
+      <td>Check automation queue depth. If queue is backed up: scale workers or increase concurrency. If empty: check campaign scheduler for missed triggers.</td>
+      <td><span class="badge amber">Medium</span> Slow decline over 2–3 weeks</td>
+    </tr>
+    <tr>
+      <td><strong>Success rate &lt; 70%</strong></td>
+      <td>Majority of sessions produce no signal. Proxy failure, rate-limiting, or prompt errors cause "silent" sessions that waste budget.</td>
+      <td>1. Check proxy pool health (rotation, city targeting). 2. Review error messages in CSV <code>error</code> column. 3. Test prompt variant on failing platform. 4. Rotate proxy city if 3+ consecutive failures from same IP.</td>
+      <td><span class="badge red">High</span> Rapid drop if sustained 3+ days</td>
+    </tr>
+    <tr>
+      <td><strong>Keyword missed 3+ days</strong></td>
+      <td>Engine stops receiving "this business → this keyword" association. Ranking for that specific query weakens.</td>
+      <td>Identify why keyword is being skipped: check campaign keyword list for typos, check if keyword has a variant map issue, manually trigger a test session for that keyword.</td>
+      <td><span class="badge amber">Medium</span> Keyword-level drop within 1–2 ranking cycles</td>
+    </tr>
+    <tr>
+      <td><strong>Keyword missed 5+ days</strong></td>
+      <td>Keyword is effectively cold. The engine treats the business as not relevant for that query.</td>
+      <td>Immediate manual session push for that keyword across all 3 platforms. After recovery, add keyword to daily priority list for 7 days.</td>
+      <td><span class="badge red">High</span> Keyword-level "NOT FOUND" at next ranking run</td>
+    </tr>
+    <tr>
+      <td><strong>Platform silent 3–4 days</strong></td>
+      <td>That platform's index starts to forget the business. Other platforms may still be fine.</td>
+      <td>Check if the platform-specific automation script is erroring (check logs). Test a single manual session on the silent platform to confirm it's working.</td>
+      <td><span class="badge amber">Medium</span> Platform-specific drop, not portfolio-wide</td>
+    </tr>
+    <tr>
+      <td><strong>Platform silent 5+ days</strong></td>
+      <td>Platform index has lost the business's signal momentum. Recovery takes 5–7 days of heavy sessions.</td>
+      <td>Double session target on the silent platform for 5 days. Do not just resume normal volume — you need catch-up volume to rebuild the signal.</td>
+      <td><span class="badge red">High</span> Likely "SUDDEN DROP" or "NOT FOUND" on platform</td>
+    </tr>
+    <tr>
+      <td><strong>Gap day (0 sessions)</strong></td>
+      <td>Breaks consistency. Engine deprioritizes businesses that "disappear" even for one day during active ranking cycles.</td>
+      <td>Investigate why: server down, scheduler missed, RabbitMQ queue empty? Next day: push 1.5× normal volume to compensate for the missed day.</td>
+      <td><span class="badge amber">Medium</span> Single gap tolerated; 2+ gaps = at-risk territory</td>
+    </tr>
+    <tr>
+      <td><strong>Prediction: AT_RISK</strong></td>
+      <td>Multiple criteria failing simultaneously. Compound effect — each failure amplifies the others.</td>
+      <td>Follow the 4-Week Ideal Flow (Section 4). Week 1: diagnose root cause. Don't just add volume — fix the underlying issue first, then push volume.</td>
+      <td><span class="badge red">Critical</span> Expect ranking drop at next bi-weekly run</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- ══════════════════════════════════════════════════════ -->
+<div class="page-break"></div>
+<h2>3. How the Signal Chain Works — Session → Ranking</h2>
+
+<div class="signal-flow">
+  <div class="signal-node">
+    <div class="sn-icon">🤖</div>
+    <div class="sn-title">Automation Sends Session</div>
+    <div class="sn-desc">Keyword + Platform + Business prompt sent to ChatGPT / Gemini / Perplexity</div>
+  </div>
+  <div class="signal-arrow">→</div>
+  <div class="signal-node">
+    <div class="sn-icon">📡</div>
+    <div class="sn-title">Engine Processes Query</div>
+    <div class="sn-desc">AI engine sees: "Top 3 for [keyword] in [city]" — evaluates all known businesses</div>
+  </div>
+  <div class="signal-arrow">→</div>
+  <div class="signal-node">
+    <div class="sn-icon">🏷️</div>
+    <div class="sn-title">Business Gets Ranked</div>
+    <div class="sn-desc">Engine places the business at position X/Y. Response recorded with rank, screenshot, text.</div>
+  </div>
+  <div class="signal-arrow">→</div>
+  <div class="signal-node">
+    <div class="sn-icon">📊</div>
+    <div class="sn-title">Daily Health Check</div>
+    <div class="sn-desc">Volume, success, keywords, platforms checked against thresholds. Prediction updated.</div>
+  </div>
+  <div class="signal-arrow">→</div>
+  <div class="signal-node">
+    <div class="sn-icon">📅</div>
+    <div class="sn-title">Bi-Weekly Ranking Run</div>
+    <div class="sn-desc">Every 14 days: official rank captured. Reflects cumulative signal quality of all sessions since last run.</div>
+  </div>
+  <div class="signal-arrow">→</div>
+  <div class="signal-node">
+    <div class="sn-icon">📉📈</div>
+    <div class="sn-title">Rank Moves</div>
+    <div class="sn-desc">Rank improves if signals were strong & consistent. Drops if gaps, low success, or keyword misses occurred.</div>
+  </div>
+</div>
+
+<div class="callout slate">
+  <div class="callout-title">⏱️ The 14-day window is critical</div>
+  <p style="margin:0">Everything that happens between two ranking runs is what determines the next rank. A problem on Day 3 of the cycle that goes unfixed means 11 more days of weakened signal. That's why daily monitoring exists — to catch problems on Day 3, not Day 14.</p>
+</div>
+
+<!-- ══════════════════════════════════════════════════════ -->
+<h2>4. The 4-Week Ideal Flow — From AT_RISK to ON_TRACK</h2>
+
+<p>When a business shows <strong>AT_RISK</strong>, follow this 4-week recovery process:</p>
+
+<div class="week-flow">
+  <div class="week-card w1">
+    <div class="week-num">Week 1</div>
+    <h3>🔍 Diagnose Root Cause</h3>
+    <ul>
+      <li>Open Health Monitor → find the business</li>
+      <li>Check which criteria are failing (volume? success? keyword? platform?)</li>
+      <li>Read the <strong>Why</strong> field — it states the specific issue</li>
+      <li>Check the CSV <code>error</code> column for that business/date</li>
+      <li>Identify if it's a proxy issue, scheduler issue, or campaign config issue</li>
+      <li>Do NOT push more volume yet — fix the root cause first</li>
+    </ul>
+  </div>
+  <div class="week-card w2">
+    <div class="week-num">Weeks 2–3</div>
+    <h3>🔧 Fix + Push Volume</h3>
+    <ul>
+      <li>Apply the fix identified in Week 1</li>
+      <li>Run a test session on each failing keyword/platform</li>
+      <li>Once success rate ≥ 90%, push 1.5× normal daily volume</li>
+      <li>Monitor keyword coverage daily — all keywords should hit every 1–2 days</li>
+      <li>Ensure all 3 platforms receive sessions every day</li>
+      <li>Check daily that prediction moves from AT_RISK → STABLE → ON_TRACK</li>
+    </ul>
+  </div>
+  <div class="week-card w3">
+    <div class="week-num">Week 3–4</div>
+    <h3>📊 Stabilize &amp; Monitor</h3>
+    <ul>
+      <li>Return to normal daily volume once 7-day average is ≥ 90%</li>
+      <li>Confirm: 0 gap days in last 7</li>
+      <li>Confirm: all keywords hit within last 2 days</li>
+      <li>Confirm: all 3 platforms active last 3 days</li>
+      <li>Prediction should now show <strong>ON_TRACK 📈</strong></li>
+      <li>Document root cause for LLM training data</li>
+    </ul>
+  </div>
+  <div class="week-card w4">
+    <div class="week-num">Week 4</div>
+    <h3>📏 Re-measure Results</h3>
+    <ul>
+      <li>Next bi-weekly ranking run captures the result</li>
+      <li>Compare position to pre-AT_RISK baseline</li>
+      <li>If improved: record what worked → use as LLM training example</li>
+      <li>If still down: review health data again — likely a platform-specific issue or a keyword that was cold longer than expected</li>
+      <li>Adjust campaign target if needed (increase target/day)</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════ -->
+<h2>5. Platform-Specific Strategy</h2>
+
+<table class="plat-table">
+  <thead>
+    <tr>
+      <th>Platform</th>
+      <th>Signal Characteristics</th>
+      <th>What Hurts Rankings Here</th>
+      <th>Recovery Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><span class="plat-badge gpt">ChatGPT</span></td>
+      <td>Tends to weight business description quality and Google Maps listing consistency. More forgiving of short gaps.</td>
+      <td>Low success rate (rate-limiting common). Keyword prompts that don't match GPT's style. Proxy IPs flagged as bots.</td>
+      <td>Rotate prompt variants. Use residential proxies. If success &lt;70% for 2 days, switch prompt to more natural language format.</td>
+    </tr>
+    <tr>
+      <td><span class="plat-badge gem">Gemini</span></td>
+      <td>Strongly weights recency and local authority signals. Most sensitive to gap days — loses memory faster than other platforms.</td>
+      <td>Any gap day drops Gemini faster than others. Low keyword diversity (only one keyword variant used repeatedly).</td>
+      <td>Zero tolerance for Gemini gaps. If 2 consecutive Gemini gap days: treat as critical and push 2× volume immediately. Use all keyword variants.</td>
+    </tr>
+    <tr>
+      <td><span class="plat-badge perp">Perplexity</span></td>
+      <td>Citation-based — weights how often the business appears in search results that Perplexity indexes. Most keyword-sensitive platform.</td>
+      <td>Keywords not matching the exact phrasing Perplexity indexes. Business not appearing in cited web sources.</td>
+      <td>Expand keyword variants — Perplexity responds to more natural long-tail phrases. If "NOT FOUND" appears: check that the Google Maps listing is indexable and current.</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- ══════════════════════════════════════════════════════ -->
+<h2>6. Keyword Coverage — How to Maintain Full Coverage</h2>
+
+<div class="callout amber">
+  <div class="callout-title">⚠️ Most ranking drops start with keyword gaps, not volume drops</div>
+  <p style="margin:0">A business can have 100% volume and 95% success rate, but if one keyword hasn't been hit for 5 days, that keyword's ranking will drop at the next run — even if every other keyword is perfect.</p>
+</div>
+
+<h3>Keyword rotation rules</h3>
+<ul>
+  <li>Each canonical keyword has a set of <strong>variant phrases</strong> used in the prompt (e.g., "best mobile detailing" → "top mobile detailing," "mobile car detailing near me," etc.)</li>
+  <li>The system tracks the <strong>canonical keyword</strong> — any successful session with any variant counts as a hit</li>
+  <li>A keyword is marked <strong>OK</strong> if it was hit in the last 1–2 days</li>
+  <li>At <strong>3 days</strong> without a hit → show ⚠️ warning — manual check needed</li>
+  <li>At <strong>5 days</strong> without a hit → 🚨 critical — push a targeted session that day</li>
+</ul>
+
+<h3>Example keyword health states:</h3>
+<div class="kw-status" style="margin-bottom:12px">
+  <span class="kw-pill ok">best mobile detailing — Today ✓</span>
+  <span class="kw-pill ok">car wash at home — 1d ago ✓</span>
+  <span class="kw-pill warn">mobile detailing service — 3d ago ⚠️</span>
+  <span class="kw-pill critical">before and after detailing — 5d ago 🚨</span>
+</div>
+
+<p><strong>Action rule:</strong> When you see a 🚨 critical keyword, do not wait for the automated queue. Manually trigger a session for that specific keyword across all 3 platforms before end of business day.</p>
+
+<!-- ══════════════════════════════════════════════════════ -->
+<div class="page-break"></div>
+<h2>7. How Daily Health Data Trains the AEO LLM</h2>
+
+<p>The daily health monitoring data is the <strong>ground truth</strong> used to train and fine-tune the AEO LLM. Each business's session history becomes a labeled training example that teaches the model to diagnose and prescribe actions.</p>
+
+<div class="training-flow">
+
+  <div class="training-card">
+    <div class="step-num">1</div>
+    <h3 style="margin-top:0">Input Features (X)</h3>
+    <p>Raw session signals captured every day from the CSV:</p>
+    <ul>
+      <li>Sessions today vs. target</li>
+      <li>Success rate (today + 7-day avg)</li>
+      <li>Keywords hit today</li>
+      <li>Days since each keyword last hit</li>
+      <li>Platform session counts (3-day window)</li>
+      <li>Gap days in last 7</li>
+      <li>Days active / campaign phase</li>
+      <li>Current ranking label (STABLE, SUDDEN_DROP…)</li>
+    </ul>
+  </div>
+
+  <div class="training-card">
+    <div class="step-num">2</div>
+    <h3 style="margin-top:0">Labels (Y)</h3>
+    <p>The diagnostic output the model learns to produce:</p>
+    <ul>
+      <li><strong>Prediction:</strong> ON_TRACK / AT_RISK / STABLE / TOO_EARLY</li>
+      <li><strong>Why:</strong> Plain-English diagnosis of the root cause</li>
+      <li><strong>Action:</strong> Specific next step for the account manager</li>
+    </ul>
+    <div class="code-block">Why: "7-day success rate 64%
+— proxy failures on Gemini
+for keyword 'mobile detailing'"
+
+Action: "Rotate Gemini proxy pool,
+push 2× sessions on this keyword
+for next 5 days"</div>
+  </div>
+
+  <div class="training-card">
+    <div class="step-num">3</div>
+    <h3 style="margin-top:0">LLM Output</h3>
+    <p>After training, the model can:</p>
+    <ul>
+      <li>Predict health state from raw daily data before a human reviews it</li>
+      <li>Generate the <strong>Why</strong> explanation automatically</li>
+      <li>Prescribe a ranked list of <strong>Actions</strong> in priority order</li>
+      <li>Answer natural-language questions: "Why did X drop on Gemini this week?"</li>
+      <li>Correlate sessions to ranking outcomes across the 14-day cycle</li>
+      <li>Flag new businesses whose early session patterns predict AT_RISK before it happens</li>
+    </ul>
+  </div>
+
+</div>
+
+<h3>The feedback loop that makes the LLM smarter over time</h3>
+
+<table class="action-table">
+  <thead>
+    <tr>
+      <th>Step</th>
+      <th>What Happens</th>
+      <th>How It Improves the Model</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><span class="badge blue">1 — Capture</span></td>
+      <td>Every session is saved to the consolidated daily CSV with timestamp, business, keyword, platform, status, rank, and error fields.</td>
+      <td>Creates a timestamped audit trail that can be replayed to reconstruct any day's health state for any business.</td>
+    </tr>
+    <tr>
+      <td><span class="badge blue">2 — Score</span></td>
+      <td>The <code>csv-data.ts</code> library computes health metrics (volume %, success rate, keyword coverage, platform windows) and assigns the prediction label.</td>
+      <td>Generates the structured feature vector (X) used as model input. Same logic the model learns to replicate.</td>
+    </tr>
+    <tr>
+      <td><span class="badge blue">3 — Label</span></td>
+      <td>The <code>why</code> and <code>action</code> strings are computed by rule-based logic today. Over time, human reviewers annotate edge cases with better explanations.</td>
+      <td>Human-annotated examples are the highest-quality training labels. Even 50 well-annotated edge cases dramatically improve model diagnostic quality.</td>
+    </tr>
+    <tr>
+      <td><span class="badge blue">4 — Verify</span></td>
+      <td>14 days later, the ranking run captures actual outcomes. The system can compare: "we predicted AT_RISK on Day 3 — did the rank actually drop?"</td>
+      <td>Creates verified outcome labels. A prediction that was correct (AT_RISK → rank dropped) is a high-confidence training example. Incorrect predictions reveal model weaknesses.</td>
+    </tr>
+    <tr>
+      <td><span class="badge blue">5 — Retrain</span></td>
+      <td>Monthly or bi-monthly, collect verified examples → fine-tune the model on new patterns (new platforms, new campaign types, new proxy failure modes).</td>
+      <td>Model continuously improves — each ranking cycle adds ~N_businesses × 14 new training examples automatically.</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- ══════════════════════════════════════════════════════ -->
+<h2>8. Daily Workflow for Account Managers</h2>
+
+<div class="callout green">
+  <div class="callout-title">✅ What to do every morning (takes 5–10 minutes)</div>
+</div>
+
+<table class="action-table">
+  <thead>
+    <tr>
+      <th>#</th>
+      <th>Action</th>
+      <th>Where to Look</th>
+      <th>If You See a Problem</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>1</td>
+      <td>Open Health Monitor. Check summary tiles: how many AT_RISK today?</td>
+      <td>Dashboard → Session Health Monitor → summary screen</td>
+      <td>If AT_RISK count increased vs. yesterday → start there first</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td>Filter by AT_RISK. For each business: read the "Why" and "Action" fields.</td>
+      <td>Left sidebar → click AT_RISK filter → click each business</td>
+      <td>The Action field tells you exactly what to do. Follow it.</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td>Check STABLE businesses. Look for platform windows with 3+ days silent.</td>
+      <td>Health Monitor → filter STABLE → expand Platform Rotation section</td>
+      <td>A platform at "⚠️ No sessions 3d" on a STABLE business = it's about to become AT_RISK. Treat it now.</td>
+    </tr>
+    <tr>
+      <td>4</td>
+      <td>Scan keyword coverage table for any 🚨 Critical keywords (5+ days).</td>
+      <td>Click any business → scroll to Keyword Coverage section</td>
+      <td>Manually trigger a session for that keyword today. Do not wait for the queue.</td>
+    </tr>
+    <tr>
+      <td>5</td>
+      <td>Check overall success rate in the daily HTML report.</td>
+      <td>Navigate to <code>/api/csv/daily-report?date=YYYY-MM-DD</code></td>
+      <td>Any business &lt;80% success → investigate proxy/prompt issue before pushing more volume</td>
+    </tr>
+    <tr>
+      <td>6</td>
+      <td>For businesses approaching their next ranking run (within 3 days): confirm ON_TRACK prediction.</td>
+      <td>Health Monitor → check "Next Ranking Run" date in each business header</td>
+      <td>If AT_RISK within 3 days of ranking run → escalate, push max volume, fix immediately</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- ══════════════════════════════════════════════════════ -->
+<h2>9. Quick Reference — Prediction States &amp; Responses</h2>
+
+<table class="action-table">
+  <thead>
+    <tr>
+      <th>Prediction</th>
+      <th>What It Means</th>
+      <th>Urgency</th>
+      <th>Standard Response</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>📈 <strong>ON_TRACK</strong></td>
+      <td>All health criteria green. Business is building signal momentum toward the next ranking run.</td>
+      <td><span class="badge green">None</span></td>
+      <td>No action needed. Maintain current volume and keyword rotation. Review daily to catch any regression.</td>
+    </tr>
+    <tr>
+      <td>➡️ <strong>STABLE</strong></td>
+      <td>Borderline. Mostly healthy but at least one criterion is borderline (e.g., 7-day avg slightly below target, or one platform at 3-day warning).</td>
+      <td><span class="badge amber">Low — Monitor</span></td>
+      <td>No immediate action but watch daily. If borderline issue not resolved within 2 days → treat as AT_RISK.</td>
+    </tr>
+    <tr>
+      <td>🚨 <strong>AT_RISK</strong></td>
+      <td>One or more criteria in critical failure. Ranking drop is likely at the next bi-weekly run without intervention today.</td>
+      <td><span class="badge red">High — Act Today</span></td>
+      <td>Follow the 4-Week Ideal Flow. Read the "Why" and "Action" fields. Fix root cause first, then increase volume.</td>
+    </tr>
+    <tr>
+      <td>⏳ <strong>TOO_EARLY</strong></td>
+      <td>Less than 7 days of data. Prediction model cannot produce a reliable assessment yet.</td>
+      <td><span class="badge slate">Info Only</span></td>
+      <td>Confirm sessions are running and succeeding. If the latest session date is 3+ days old → restart sessions immediately (the business has stalled, not just started).</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- ══════════════════════════════════════════════════════ -->
+<div class="footer">
+  Signal AEO Dashboard &nbsp;·&nbsp; Daily Session Health Process Guide &nbsp;·&nbsp; Platforms: ChatGPT · Gemini · Perplexity &nbsp;·&nbsp; Ranking cycle: bi-weekly
+</div>
+
+</body>
+</html>

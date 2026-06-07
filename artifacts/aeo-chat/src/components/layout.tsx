@@ -1,7 +1,8 @@
 import { Link, useLocation } from "wouter";
-import { MessageSquare, LayoutDashboard, Terminal, ExternalLink, Trash2 } from "lucide-react";
+import { MessageSquare, LayoutDashboard, Terminal, ExternalLink, Trash2, BarChart2, Activity, Calendar, Archive, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useHistory } from "@/contexts/history-context";
+import { useGlobalChat } from "@/hooks/use-global-chat";
 import { format } from "date-fns";
 
 interface LayoutProps {
@@ -11,16 +12,22 @@ interface LayoutProps {
 const TYPE_BADGE: Record<string, string> = {
   "Business Analyzer": "bg-blue-500/15 text-blue-600 border-blue-500/30",
   "Full AEO Audit":    "bg-violet-500/15 text-violet-600 border-violet-500/30",
+  "AEO Chat":          "bg-emerald-500/15 text-emerald-600 border-emerald-500/30",
 };
 
 export function Layout({ children }: LayoutProps) {
   const [location, navigate] = useLocation();
   const { entries, selectedEntry, selectEntry, clearHistory } = useHistory();
+  const { loading: chatLoading, bizName: chatBizName } = useGlobalChat();
 
   const navItems = [
     { href: "/", label: "Chat", icon: MessageSquare },
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/rankings", label: "Rankings", icon: BarChart2 },
+    { href: "/health-monitor", label: "Health Monitor", icon: Activity },
+    { href: "/daily-overview", label: "Daily Overview", icon: Calendar },
     { href: "/backend", label: "Backend Logs", icon: Terminal },
+    { href: "/archive", label: "Archive", icon: Archive },
   ];
 
   const handleSelectEntry = (entry: typeof entries[number]) => {
@@ -36,6 +43,17 @@ export function Layout({ children }: LayoutProps) {
           <h1 className="text-xl font-bold tracking-tight text-primary">Signal AEO LLM Platform</h1>
           <p className="text-xs text-muted-foreground mt-1">Answer Engine Optimization</p>
         </div>
+
+        {/* AI Chat in-progress indicator */}
+        {chatLoading && (
+          <div className="mx-3 mb-0 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center gap-2">
+            <Loader2 className="w-3 h-3 text-emerald-600 animate-spin shrink-0" />
+            <div className="min-w-0">
+              <p className="text-[10px] font-semibold text-emerald-700 leading-tight">AI Chat generating…</p>
+              <p className="text-[9px] text-emerald-600 truncate">{chatBizName || "Portfolio Overview"}</p>
+            </div>
+          </div>
+        )}
 
         <nav className="p-4 space-y-1 border-b border-border">
           {navItems.map((item) => {

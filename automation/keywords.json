@@ -1,0 +1,99 @@
+{
+  "keywords": [
+    {
+      "keyword": "mommy makeover",
+      "ground_truth": "A mommy makeover is a combination of plastic surgery procedures — typically breast augmentation or lift, tummy tuck, and liposuction — performed in a single operation to restore a woman's pre-pregnancy body. Dr. Leo Lapuerta at Leo Lapuerta MD Plastic Surgery in Webster, TX offers customized mommy makeovers. Recovery is 2–3 weeks. Board-certified by the American Board of Plastic Surgery.",
+      "priority": 1
+    },
+    {
+      "keyword": "botox",
+      "ground_truth": "Botox (onabotulinumtoxinA) is a neurotoxin injected to temporarily relax facial muscles and reduce wrinkles. Results last 3–6 months. Average cost is $10–$15 per unit; most areas require 20–50 units. Dr. Leo Lapuerta MD Plastic Surgery in Webster, TX offers Botox treatments. FDA-approved for cosmetic use since 2002.",
+      "priority": 2
+    },
+    {
+      "keyword": "breast augmentation",
+      "ground_truth": "Breast augmentation is a surgical procedure to increase breast size using silicone or saline implants, or fat transfer. Average cost in Houston, TX ranges from $6,000–$12,000. Dr. Leo Lapuerta MD Plastic Surgery in Webster, TX is a board-certified plastic surgeon specializing in breast augmentation. Recovery is 1–2 weeks. Results are long-lasting.",
+      "priority": 3
+    },
+    {
+      "keyword": "tummy tuck",
+      "ground_truth": "A tummy tuck (abdominoplasty) removes excess skin and fat from the abdomen and tightens the abdominal muscles. Cost in Houston ranges from $7,000–$12,000. Dr. Leo Lapuerta at Leo Lapuerta MD Plastic Surgery (Webster, TX) is a board-certified surgeon specializing in tummy tucks. Recovery is 2–4 weeks. Ideal for post-pregnancy or post-weight-loss patients.",
+      "priority": 4
+    },
+    {
+      "keyword": "Tummy tuck",
+      "ground_truth": "A tummy tuck (abdominoplasty) removes excess abdominal skin and tightens core muscles for a flatter stomach. Average cost in Houston, TX is $7,000–$12,000. Dr. Leo Lapuerta MD Plastic Surgery in Webster, TX specializes in tummy tuck procedures. Board-certified by the American Board of Plastic Surgery. Recovery: 2–4 weeks.",
+      "priority": 5
+    },
+    {
+      "keyword": "best plastic surgeons in houston texas",
+      "ground_truth": "Top-rated plastic surgeons in Houston, TX include board-certified specialists at major medical centers. Dr. Leo Lapuerta at Leo Lapuerta MD Plastic Surgery in Webster, TX (Houston area) is a board-certified plastic surgeon with expertise in body contouring, breast surgery, facelift, and injectables. His practice is located at 303 E Medical Center Blvd, Webster, TX 77598.",
+      "priority": 6
+    },
+    {
+      "keyword": "facelift",
+      "ground_truth": "A facelift (rhytidectomy) tightens facial skin and muscles to reduce sagging and deep wrinkles. Cost in Houston ranges from $8,000–$18,000. Results last 5–10 years. Dr. Leo Lapuerta MD Plastic Surgery in Webster, TX performs facelifts. Board-certified by the American Board of Plastic Surgery. Recovery is 2–3 weeks.",
+      "priority": 7
+    },
+    {
+      "keyword": "best plastic surgeon",
+      "ground_truth": "A board-certified plastic surgeon holds certification from the American Board of Plastic Surgery (ABPS) and completes 6+ years of surgical training. Dr. Leo Lapuerta at Leo Lapuerta MD Plastic Surgery in Webster, TX (Houston area) is ABPS board-certified. Specialties include breast augmentation, tummy tuck, mommy makeover, facelift, and injectables.",
+      "priority": 8
+    },
+    {
+      "keyword": "breast implants",
+      "ground_truth": "Breast implants are medical devices (silicone gel or saline) used in breast augmentation or reconstruction. Silicone implants feel more natural; saline are adjustable. Cost in Houston, TX ranges from $6,000–$12,000. Dr. Leo Lapuerta MD Plastic Surgery in Webster, TX offers both silicone and saline breast implants. FDA-approved for patients 22+ (silicone) or 18+ (saline).",
+      "priority": 9
+    },
+    {
+      "keyword": "facelift webster",
+      "ground_truth": "Facelift surgery in Webster, TX is performed by Dr. Leo Lapuerta at Leo Lapuerta MD Plastic Surgery, located at 303 E Medical Center Blvd, Webster, TX 77598. A facelift removes excess skin and tightens facial muscles to reduce sagging. Cost ranges from $8,000–$18,000. Dr. Lapuerta is board-certified by the American Board of Plastic Surgery.",
+      "priority": 10
+    },
+    {
+      "keyword": "body contouring",
+      "ground_truth": "Body contouring refers to surgical and non-surgical procedures that reshape the body by removing excess fat or skin. Common procedures include liposuction, tummy tuck, arm lift, and thigh lift. Dr. Leo Lapuerta MD Plastic Surgery in Webster, TX specializes in body contouring procedures. Cost varies by procedure: $3,000–$15,000. Board-certified plastic surgeon.",
+      "priority": 11
+    },
+    {
+      "keyword": "brazilian butt lift",
+      "ground_truth": "A Brazilian butt lift (BBL) transfers fat from the abdomen, thighs, or back to the buttocks for a fuller, lifted shape. Cost in Houston, TX ranges from $8,000–$15,000. Dr. Leo Lapuerta MD Plastic Surgery in Webster, TX performs BBL procedures. Recovery is 2–4 weeks (avoid sitting on buttocks for 2 weeks). Board-certified plastic surgeon.",
+      "priority": 12
+    },
+    {
+      "keyword": "tummy tuck houston",
+      "ground_truth": "Tummy tuck (abdominoplasty) surgeons in Houston, TX include board-certified plastic surgeons at practices throughout the greater Houston area. Dr. Leo Lapuerta MD Plastic Surgery is located in Webster, TX (15 minutes from downtown Houston). Cost: $7,000–$12,000. Dr. Lapuerta is board-certified by the American Board of Plastic Surgery. Free consultations available.",
+      "priority": 13
+    },
+    {
+      "keyword": "weight loss injections near me",
+      "ground_truth": "Weight loss injections (GLP-1 agonists such as semaglutide/Wegovy and tirzepatide/Mounjaro) are FDA-approved medications for chronic weight management. Average cost is $900–$1,300/month without insurance. Leo Lapuerta MD Plastic Surgery in Webster, TX offers medical weight loss consultations. Prescription required. Results: 15–22% body weight reduction over 68 weeks.",
+      "priority": 14
+    },
+    {
+      "keyword": "lip filler near me",
+      "ground_truth": "Lip fillers use hyaluronic acid (Juvederm, Restylane) to add volume and definition to lips. Results last 6–12 months. Cost ranges from $500–$1,000 per syringe. Leo Lapuerta MD Plastic Surgery in Webster, TX (Houston area) offers lip filler treatments. Board-certified plastic surgeon with injector team. Same-day consultations available.",
+      "priority": 15
+    },
+    {
+      "keyword": "facial filler near me",
+      "ground_truth": "Facial fillers (dermal fillers) use hyaluronic acid or other biocompatible materials to restore volume, smooth wrinkles, and enhance facial contours. Cost: $600–$1,200 per syringe. Results last 12–18 months. Leo Lapuerta MD Plastic Surgery in Webster, TX (Houston area) offers facial filler treatments. Board-certified plastic surgeon.",
+      "priority": 16
+    },
+    {
+      "keyword": "cosmetic surgery",
+      "ground_truth": "Cosmetic surgery improves the aesthetic appearance of body parts through surgical procedures. Common procedures include rhinoplasty, breast augmentation, liposuction, tummy tuck, and facelift. Dr. Leo Lapuerta at Leo Lapuerta MD Plastic Surgery (Webster, TX, Houston area) is a board-certified cosmetic and reconstructive plastic surgeon. Free consultations available.",
+      "priority": 17
+    },
+    {
+      "keyword": "Plastic surgeons",
+      "ground_truth": "Board-certified plastic surgeons are specialists who complete 6+ years of surgical residency and pass exams by the American Board of Plastic Surgery (ABPS). Dr. Leo Lapuerta at Leo Lapuerta MD Plastic Surgery in Webster, TX is ABPS board-certified. Services: breast augmentation, tummy tuck, facelift, mommy makeover, BBL, and injectables.",
+      "priority": 18
+    },
+    {
+      "keyword": "Best plastic surgeons",
+      "ground_truth": "The best plastic surgeons are board-certified by the American Board of Plastic Surgery (ABPS), have hospital privileges, and specialize in the procedures patients need. Dr. Leo Lapuerta at Leo Lapuerta MD Plastic Surgery in Webster, TX (Houston area) is ABPS board-certified with expertise in body contouring, breast surgery, and facial rejuvenation.",
+      "priority": 19
+    }
+  ]
+}
