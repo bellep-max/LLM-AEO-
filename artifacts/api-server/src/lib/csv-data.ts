@@ -1320,3 +1320,116 @@ export function getAllAEOAnalysis(): BusinessAEOAnalysis[] {
 export function getBusinessAEOAnalysis(bizName: string): BusinessAEOAnalysis | null {
   return getAllAEOAnalysis().find(b => b.bizName === bizName) ?? null;
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SECTION E — BACKLINK ACTION ITEMS (from daily consolidated CSVs)
+// ══════════════════════════════════════════════════════════════════════════════
+
+export interface BacklinkActionItem {
+  bizName: string;
+  clientName: string;
+  injectedCount: number;
+  foundCount: number;
+  missedPlatforms: string[];
+  foundPlatforms: string[];
+  foundUrls: string[];
+  status: "CRITICAL" | "PARTIAL" | "RESOLVED";
+}
+
+export interface BacklinkActionReport {
+  date: string;
+  sourceFile: string | null;
+  totalBusinessesWithInjected: number;
+  totalInjectedSessions: number;
+  totalFoundSessions: number;
+  detectionRate: number;
+  immediateAction: BacklinkActionItem[];
+  monitorClosely: BacklinkActionItem[];
+  resolved: BacklinkActionItem[];
+}
+
+const MONTH_ABBR = ["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"];
+
+function findDailyFile(date: string): string | null {
+  if (!existsSync(DAILY_CSV_DIR)) return null;
+  const d = new Date(date + "T00:00:00Z");
+  const mon = MONTH_ABBR[d.getUTCMonth()];
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  const pattern = `${mon}${day}`;
+  let files: string[] = [];
+  try { files = readdirSync(DAILY_CSV_DIR).filter(f => f.endsWith(".csv") || f.endsWith(".csv")); }
+  catch { return null; }
+  const match = files.find(f => f.toLowerCase().includes(pattern));
+  return match ? resolve(DAILY_CSV_DIR, match) : null;
+}
+
+export function getBacklinkActionItems(date: string): BacklinkActionReport {
+  const filePath = findDailyFile(date);
+  if (!filePath) {
+    return {
+      date, sourceFile: null,
+      totalBusinessesWithInjected: 0, totalInjectedSessions: 0,
+      totalFoundSessions: 0, detectionRate: 0,
+      immediateAction: [], monitorClosely: [], resolved: [],
+    };
+  }
+
+  const rows = parseCSV(filePath);
+  const injected = rows.filter(r => r["backlink_injected"]?.toLowerCase() === "true");
+
+  // Group by business
+  const bizMap = new Map<string, { clientName: string; sessions: Array<{ platform: string; found: boolean; url: string }> }>();
+  for (const r of injected) {
+    const biz = r["biz_name"]?.trim();
+    if (!biz) continue;
+    if (!bizMap.has(biz)) bizMap.set(biz, { clientName: r["client_name"]?.trim() ?? "", sessions: [] });
+    bizMap.get(biz)!.sessions.push({
+      platform: normPlatform(r["platform"] ?? r["ai_platform"] ?? ""),
+      found: r["backlink_found"]?.toLowerCase() === "true",
+      url: r["backlink_url"]?.trim() ?? "",
+    });
+  }
+
+  const immediateAction: BacklinkActionItem[] = [];
+  const monitorClosely: BacklinkActionItem[] = [];
+  const resolved: BacklinkActionItem[] = [];
+
+  for (const [bizName, data] of bizMap) {
+    const { clientName, sessions } = data;
+    const injectedCount = sessions.length;
+    const foundCount = sessions.filter(s => s.found).length;
+    const missedPlatforms = sessions.filter(s => !s.found).map(s => s.platform);
+    const foundPlatforms = sessions.filter(s => s.found).map(s => s.platform);
+    const foundUrls = [...new Set(sessions.filter(s => s.found && s.url).map(s => s.url))];
+
+    const item: BacklinkActionItem = {
+      bizName, clientName, injectedCount, foundCount,
+      missedPlatforms, foundPlatforms, foundUrls,
+      status: foundCount === 0 ? "CRITICAL" : foundCount < injectedCount ? "PARTIAL" : "RESOLVED",
+    };
+
+    if (item.status === "CRITICAL") immediateAction.push(item);
+    else if (item.status === "PARTIAL") monitorClosely.push(item);
+    else resolved.push(item);
+  }
+
+  // Sort immediate action by most injections (highest effort wasted first)
+  immediateAction.sort((a, b) => b.injectedCount - a.injectedCount);
+  monitorClosely.sort((a, b) => (b.injectedCount - b.foundCount) - (a.injectedCount - a.foundCount));
+  resolved.sort((a, b) => a.bizName.localeCompare(b.bizName));
+
+  const totalInjectedSessions = injected.length;
+  const totalFoundSessions = injected.filter(r => r["backlink_found"]?.toLowerCase() === "true").length;
+
+  return {
+    date,
+    sourceFile: filePath.split("/").pop() ?? null,
+    totalBusinessesWithInjected: bizMap.size,
+    totalInjectedSessions,
+    totalFoundSessions,
+    detectionRate: totalInjectedSessions > 0 ? totalFoundSessions / totalInjectedSessions : 0,
+    immediateAction,
+    monitorClosely,
+    resolved,
+  };
+}

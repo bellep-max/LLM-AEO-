@@ -8,12 +8,36 @@ import {
   Calendar, RefreshCw, Search, Loader2, AlertCircle,
   TrendingUp, TrendingDown, Minus, AlertTriangle,
   BarChart2, CheckCircle2, ChevronDown, ChevronRight, MessageSquare,
-  ClipboardList, Zap, Eye, Trophy,
+  ClipboardList, Zap, Eye, Trophy, Link2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 type Prediction = "ON_TRACK" | "AT_RISK" | "STABLE" | "TOO_EARLY";
+
+interface BacklinkActionItem {
+  bizName: string;
+  clientName: string;
+  injectedCount: number;
+  foundCount: number;
+  missedPlatforms: string[];
+  foundPlatforms: string[];
+  foundUrls: string[];
+  status: "CRITICAL" | "PARTIAL" | "RESOLVED";
+}
+
+interface BacklinkActionReport {
+  date: string;
+  sourceFile: string | null;
+  totalBusinessesWithInjected: number;
+  totalInjectedSessions: number;
+  totalFoundSessions: number;
+  detectionRate: number;
+  immediateAction: BacklinkActionItem[];
+  monitorClosely: BacklinkActionItem[];
+  resolved: BacklinkActionItem[];
+}
+
 type RankLabel =
   | "SUDDEN_IMPROVEMENT" | "STEADY_IMPROVEMENT" | "NO_CHANGE"
   | "STEADY_DROP" | "SUDDEN_DROP" | "BASELINE"
@@ -1377,6 +1401,7 @@ export function DailyOverviewPage() {
   const [reportDate, setReportDate] = useState("");
   const [byDateData, setByDateData] = useState<ByDateData | null>(null);
   const [excludeFirstRun, setExcludeFirstRun] = useState(true);
+  const [backlinkReport, setBacklinkReport] = useState<BacklinkActionReport | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -1408,10 +1433,12 @@ export function DailyOverviewPage() {
     Promise.all([
       fetch(`/api/csv/daily/overview?date=${reportDate}`).then(r => r.json()),
       fetch(`/api/csv/sessions/by-date?date=${reportDate}`).then(r => r.json()),
+      fetch(`/api/csv/backlinks/action-items?date=${reportDate}`).then(r => r.json()).catch(() => null),
     ])
-      .then(([overview, byDate]) => {
+      .then(([overview, byDate, backlinks]) => {
         setData(overview);
         setByDateData(byDate);
+        if (backlinks) setBacklinkReport(backlinks);
         setLoading(false);
       })
       .catch((e) => { setError(e.message); setLoading(false); });
@@ -1596,6 +1623,15 @@ export function DailyOverviewPage() {
             <TabsTrigger value="reports" className="text-xs h-8 gap-1.5">
               <CheckCircle2 className="w-3 h-3" />Per-Business Reports
             </TabsTrigger>
+            <TabsTrigger value="backlinks" className="text-xs h-8 gap-1.5">
+              <Link2 className="w-3 h-3" />
+              Backlink Actions
+              {backlinkReport && (backlinkReport.immediateAction.length + backlinkReport.monitorClosely.length) > 0 && (
+                <span className="text-red-500 font-bold">
+                  ({backlinkReport.immediateAction.length + backlinkReport.monitorClosely.length})
+                </span>
+              )}
+            </TabsTrigger>
             <TabsTrigger value="chat" className="text-xs h-8 gap-1.5">
               <MessageSquare className="w-3 h-3" />AI Chat
             </TabsTrigger>
@@ -1629,6 +1665,181 @@ export function DailyOverviewPage() {
           {/* Action Items tab */}
           <TabsContent value="actions" className="mt-4">
             <ActionItemsPanel data={data} search={search} />
+          </TabsContent>
+
+          {/* Backlink Actions tab */}
+          <TabsContent value="backlinks" className="mt-4 space-y-4">
+            {!backlinkReport || backlinkReport.totalBusinessesWithInjected === 0 ? (
+              <div className="rounded-xl border border-border p-8 text-center">
+                <Link2 className="w-8 h-8 text-muted-foreground/40 mx-auto mb-3" />
+                <p className="text-sm font-semibold text-foreground">No backlink injection data for {fmt(reportDate || data.asOfDate)}</p>
+                <p className="text-xs text-muted-foreground mt-1">Daily consolidated CSV not found for this date.</p>
+              </div>
+            ) : (
+              <>
+                {/* Summary header */}
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-bold flex items-center gap-2">
+                      <Link2 className="w-4 h-4 text-primary" />
+                      Backlink Injection Report — {fmt(backlinkReport.date)}
+                    </h3>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      {backlinkReport.totalBusinessesWithInjected} businesses · {backlinkReport.totalFoundSessions}/{backlinkReport.totalInjectedSessions} sessions detected
+                      ({(backlinkReport.detectionRate * 100).toFixed(0)}% detection rate)
+                      {backlinkReport.sourceFile && <span className="ml-2 opacity-50">· {backlinkReport.sourceFile}</span>}
+                    </p>
+                  </div>
+                </div>
+
+                {/* KPI tiles */}
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="rounded-xl border-2 border-red-400/40 bg-red-500/5 p-4 text-center">
+                    <div className="flex items-center justify-center gap-1.5 mb-1">
+                      <AlertTriangle className="w-4 h-4 text-red-500" />
+                      <span className="text-[10px] font-bold uppercase text-red-600">Immediate Action</span>
+                    </div>
+                    <p className="text-3xl font-bold text-red-600">{backlinkReport.immediateAction.length}</p>
+                    <p className="text-[10px] text-muted-foreground mt-1">0% detection — all injections undetected</p>
+                  </div>
+                  <div className="rounded-xl border-2 border-amber-400/40 bg-amber-500/5 p-4 text-center">
+                    <div className="flex items-center justify-center gap-1.5 mb-1">
+                      <Eye className="w-4 h-4 text-amber-500" />
+                      <span className="text-[10px] font-bold uppercase text-amber-600">Monitor Closely</span>
+                    </div>
+                    <p className="text-3xl font-bold text-amber-600">{backlinkReport.monitorClosely.length}</p>
+                    <p className="text-[10px] text-muted-foreground mt-1">partial detection — some platforms missed</p>
+                  </div>
+                  <div className="rounded-xl border-2 border-emerald-400/40 bg-emerald-500/5 p-4 text-center">
+                    <div className="flex items-center justify-center gap-1.5 mb-1">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                      <span className="text-[10px] font-bold uppercase text-emerald-600">Resolved</span>
+                    </div>
+                    <p className="text-3xl font-bold text-emerald-600">{backlinkReport.resolved.length}</p>
+                    <p className="text-[10px] text-muted-foreground mt-1">all injections detected successfully</p>
+                  </div>
+                </div>
+
+                {/* Immediate Action table */}
+                {backlinkReport.immediateAction.length > 0 && (
+                  <div className="rounded-xl border border-red-400/30 overflow-hidden">
+                    <div className="bg-red-500/8 px-4 py-3 flex items-center gap-2 border-b border-red-400/20">
+                      <AlertTriangle className="w-4 h-4 text-red-500 shrink-0" />
+                      <div>
+                        <p className="text-sm font-bold text-red-700">Immediate Action Required</p>
+                        <p className="text-[10px] text-muted-foreground">
+                          {backlinkReport.immediateAction.length} businesses — backlinks were injected but detected 0% across all platforms
+                        </p>
+                      </div>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead className="bg-red-500/5 border-b border-red-400/20">
+                          <tr>
+                            <th className="text-left px-4 py-2 font-semibold text-muted-foreground">Business</th>
+                            <th className="text-left px-4 py-2 font-semibold text-muted-foreground">Client</th>
+                            <th className="text-center px-4 py-2 font-semibold text-muted-foreground">Injected</th>
+                            <th className="text-center px-4 py-2 font-semibold text-muted-foreground">Detected</th>
+                            <th className="text-left px-4 py-2 font-semibold text-muted-foreground">Missed Platforms</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border/30">
+                          {backlinkReport.immediateAction.map((item) => (
+                            <tr key={item.bizName} className="hover:bg-red-500/5">
+                              <td className="px-4 py-2.5 font-semibold max-w-[200px]">
+                                <p className="truncate" title={item.bizName}>{item.bizName}</p>
+                              </td>
+                              <td className="px-4 py-2.5 text-muted-foreground max-w-[140px]">
+                                <p className="truncate">{item.clientName || "—"}</p>
+                              </td>
+                              <td className="px-4 py-2.5 text-center font-mono font-semibold">{item.injectedCount}</td>
+                              <td className="px-4 py-2.5 text-center font-mono font-bold text-red-600">0 / {item.injectedCount}</td>
+                              <td className="px-4 py-2.5">
+                                <div className="flex flex-wrap gap-1">
+                                  {[...new Set(item.missedPlatforms)].map((p) => (
+                                    <span key={p} className="text-[10px] px-1.5 py-0.5 rounded border bg-red-500/10 text-red-700 border-red-400/30">{p}</span>
+                                  ))}
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Monitor Closely table */}
+                {backlinkReport.monitorClosely.length > 0 && (
+                  <div className="rounded-xl border border-amber-400/30 overflow-hidden">
+                    <div className="bg-amber-500/8 px-4 py-3 flex items-center gap-2 border-b border-amber-400/20">
+                      <Eye className="w-4 h-4 text-amber-500 shrink-0" />
+                      <div>
+                        <p className="text-sm font-bold text-amber-700">Monitor Closely — Partial Detection</p>
+                        <p className="text-[10px] text-muted-foreground">
+                          {backlinkReport.monitorClosely.length} businesses — at least one injection detected but some platforms missed
+                        </p>
+                      </div>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead className="bg-amber-500/5 border-b border-amber-400/20">
+                          <tr>
+                            <th className="text-left px-4 py-2 font-semibold text-muted-foreground">Business</th>
+                            <th className="text-left px-4 py-2 font-semibold text-muted-foreground">Client</th>
+                            <th className="text-center px-4 py-2 font-semibold text-muted-foreground">Detection</th>
+                            <th className="text-left px-4 py-2 font-semibold text-muted-foreground">Missed</th>
+                            <th className="text-left px-4 py-2 font-semibold text-muted-foreground">Detected URL</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border/30">
+                          {backlinkReport.monitorClosely.map((item) => (
+                            <tr key={item.bizName} className="hover:bg-amber-500/5">
+                              <td className="px-4 py-2.5 font-semibold max-w-[180px]">
+                                <p className="truncate" title={item.bizName}>{item.bizName}</p>
+                              </td>
+                              <td className="px-4 py-2.5 text-muted-foreground max-w-[130px]">
+                                <p className="truncate">{item.clientName || "—"}</p>
+                              </td>
+                              <td className="px-4 py-2.5 text-center font-mono font-bold text-amber-600">
+                                {item.foundCount} / {item.injectedCount}
+                              </td>
+                              <td className="px-4 py-2.5">
+                                <div className="flex flex-wrap gap-1">
+                                  {[...new Set(item.missedPlatforms)].map((p) => (
+                                    <span key={p} className="text-[10px] px-1.5 py-0.5 rounded border bg-amber-500/10 text-amber-700 border-amber-400/30">{p}</span>
+                                  ))}
+                                </div>
+                              </td>
+                              <td className="px-4 py-2.5 max-w-[200px]">
+                                {item.foundUrls.length > 0 ? (
+                                  <p className="text-[10px] text-emerald-600 truncate" title={item.foundUrls[0]}>
+                                    ✓ {item.foundUrls[0]}
+                                  </p>
+                                ) : <span className="text-muted-foreground/40">—</span>}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Resolved section (collapsed summary) */}
+                {backlinkReport.resolved.length > 0 && (
+                  <div className="rounded-xl border border-emerald-400/30 bg-emerald-500/5 px-4 py-3 flex items-center gap-3">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                    <p className="text-xs text-emerald-700 font-semibold">
+                      {backlinkReport.resolved.length} business{backlinkReport.resolved.length !== 1 ? "es" : ""} fully resolved:
+                      <span className="font-normal ml-1 text-muted-foreground">
+                        {backlinkReport.resolved.map(r => r.bizName).join(", ")}
+                      </span>
+                    </p>
+                  </div>
+                )}
+              </>
+            )}
           </TabsContent>
 
           {/* Alerts tab */}

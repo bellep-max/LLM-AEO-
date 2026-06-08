@@ -12,6 +12,7 @@ import {
   getAsOfDate,
   getAllAEOAnalysis,
   getBusinessAEOAnalysis,
+  getBacklinkActionItems,
   type Prediction,
   type PerformanceTier,
   type AEOFlagType,
@@ -861,6 +862,24 @@ router.get("/csv/sessions/by-date", (req, res) => {
     }).filter(b => b.total > 0);
     res.json({ date, businesses, total: businesses.length });
   } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+/**
+ * GET /csv/backlinks/action-items?date=YYYY-MM-DD
+ * Returns businesses with backlinks injected on the given date, grouped by detection status.
+ * Reads the daily consolidated CSV file for that date from AEO_DAILY_CSV_DIR.
+ */
+router.get("/csv/backlinks/action-items", (req, res) => {
+  try {
+    const dateParam = (req.query["date"] as string | undefined)?.slice(0, 10);
+    const date = dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam)
+      ? dateParam
+      : getAsOfDate();
+    const report = getBacklinkActionItems(date);
+    res.json(report);
+  } catch (err: unknown) {
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
   }
 });
