@@ -84,6 +84,12 @@ interface RankAlert {
   gapDays7: number; avg7DaySuccessRate: number;
 }
 
+interface KwRotationBiz {
+  bizName: string; clientName: string;
+  dailySessions: Array<{ date: string; sessions: number }>;
+  avgSessionsPerDay: number; gapPerDay: number; isAtRisk: boolean;
+}
+
 interface DailyOverview {
   asOfDate: string;
   totalBusinesses: number;
@@ -101,6 +107,8 @@ interface DailyOverview {
   atRiskBusinesses: AtRiskBiz[];
   rankAlerts: RankAlert[];
   businesses: BizRow[];
+  keywordRotationGap: KwRotationBiz[];
+  keywordRotationTotal: number;
 }
 
 interface ByDateBiz {
@@ -111,7 +119,7 @@ interface ByDateData { date: string; businesses: ByDateBiz[]; total: number; }
 
 // ── Config ─────────────────────────────────────────────────────────────────────
 const PRED: Record<Prediction, { label: string; emoji: string; dot: string; text: string; bg: string; ring: string }> = {
-  AT_RISK:   { label: "At Risk of Drop",          emoji: "🚨", dot: "bg-blue-500",    text: "text-blue-700",    bg: "bg-blue-50 dark:bg-blue-950/40",     ring: "border-blue-400" },
+  AT_RISK:   { label: "Under Observation",         emoji: "🔍", dot: "bg-blue-500",    text: "text-blue-700",    bg: "bg-blue-50 dark:bg-blue-950/40",     ring: "border-blue-400" },
   STABLE:    { label: "Stable — Holding Position", emoji: "➡️", dot: "bg-amber-500",   text: "text-amber-700",   bg: "bg-amber-50 dark:bg-amber-950/40",   ring: "border-amber-400" },
   ON_TRACK:  { label: "On Track for Improvement",  emoji: "📈", dot: "bg-emerald-500", text: "text-emerald-700", bg: "bg-emerald-50 dark:bg-emerald-950/40",ring: "border-emerald-400" },
   TOO_EARLY: { label: "Too Early to Assess",        emoji: "⏳", dot: "bg-slate-400",   text: "text-slate-600",   bg: "bg-slate-50 dark:bg-slate-900/60",   ring: "border-slate-300" },
@@ -241,9 +249,11 @@ function DateSummaryCard({ bd, allBizinesses }: { bd: ByDateData; allBizinesses:
     Object.entries(b.platforms).forEach(([p, n]) => { acc[p] = (acc[p] ?? 0) + n; });
     return acc;
   }, {});
-  const noSessions = allBizinesses
-    .filter(b => !bd.businesses.find(d => d.bizName === b.bizName))
-    .map(b => b.bizName);
+  const bdBizSet = new Set(bd.businesses.map(d => d.bizName));
+  // Only flag established businesses (active 7+ days) — brand-new campaigns aren't "missed"
+  const noSessionsBiz = allBizinesses
+    .filter(b => !bdBizSet.has(b.bizName) && b.daysActive >= 7)
+    .sort((a, b) => b.gapDays7 - a.gapDays7);
   const topBusinesses = [...bd.businesses].sort((a, b) => b.total - a.total).slice(0, 5);
 
   return (
@@ -259,8 +269,8 @@ function DateSummaryCard({ bd, allBizinesses }: { bd: ByDateData; allBizinesses:
           {[
             { label: "Businesses with Sessions", val: bd.total, sub: `of ${allBizinesses.length} total`, color: "text-primary" },
             { label: "Total Sessions", val: totalSessions, sub: "that day", color: "text-foreground" },
-            { label: "Successful Sessions", val: totalSuccess, sub: `${pct(overallRate)} success rate`, color: overallRate >= 0.9 ? "text-emerald-600" : overallRate >= 0.7 ? "text-amber-600" : "text-orange-600" },
-            { label: "No Sessions", val: noSessions.length, sub: "businesses inactive", color: noSessions.length === 0 ? "text-emerald-600" : "text-orange-600" },
+            { label: "Success Rate", val: `${pct(overallRate)}`, sub: `${totalSuccess} / ${totalSessions} sessions ok`, color: overallRate >= 0.9 ? "text-emerald-600" : overallRate >= 0.7 ? "text-amber-600" : "text-orange-600" },
+            { label: "Missed (Established)", val: noSessionsBiz.length, sub: "active businesses with 0 sessions", color: noSessionsBiz.length === 0 ? "text-emerald-600" : "text-red-500" },
           ].map(({ label, val, sub, color }) => (
             <div key={label} className="rounded-lg border border-border bg-card p-3">
               <p className={cn("text-2xl font-bold", color)}>{val}</p>
@@ -301,19 +311,39 @@ function DateSummaryCard({ bd, allBizinesses }: { bd: ByDateData; allBizinesses:
           </div>
         </div>
 
-        {/* Inactive businesses */}
-        {noSessions.length > 0 && (
+        {/* Missed today — established businesses only, fully readable */}
+        {noSessionsBiz.length > 0 && (
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground mb-2">
-              No Sessions on {fmt(bd.date)} ({noSessions.length} businesses)
+            <p className="text-[10px] font-bold uppercase tracking-wide text-red-500 mb-2">
+              ⚠ No Sessions on {fmt(bd.date)} — {noSessionsBiz.length} established business{noSessionsBiz.length > 1 ? "es" : ""}
             </p>
-            <div className="flex flex-wrap gap-1">
-              {noSessions.slice(0, 12).map((name, i) => (
-                <span key={i} className="text-[10px] bg-orange-100 text-orange-700 border border-orange-300 rounded px-1.5 py-0.5">{name}</span>
-              ))}
-              {noSessions.length > 12 && (
-                <span className="text-[10px] text-muted-foreground px-1.5 py-0.5">+{noSessions.length - 12} more</span>
-              )}
+            <div className="space-y-1.5">
+              {noSessionsBiz.map((b, i) => {
+                const pCfg = PRED[b.prediction];
+                const isHighRisk = b.gapDays7 >= 3;
+                return (
+                  <div key={i} className={cn(
+                    "flex items-start gap-3 rounded-lg border px-3 py-2",
+                    isHighRisk ? "border-red-300 bg-red-50 dark:bg-red-950/30" : "border-amber-200 bg-amber-50/60 dark:bg-amber-950/20"
+                  )}>
+                    <div className="flex-1 min-w-0">
+                      {b.clientName && (
+                        <p className="text-[9px] text-muted-foreground mb-0.5">👤 {b.clientName}</p>
+                      )}
+                      <p className="text-xs font-semibold text-foreground leading-snug break-words">{b.bizName}</p>
+                    </div>
+                    <div className="shrink-0 text-right space-y-0.5">
+                      <p className={cn("text-[10px] font-semibold", pCfg.text)}>
+                        {pCfg.emoji} {pCfg.label}
+                      </p>
+                      <p className={cn("text-[9px] font-medium", isHighRisk ? "text-red-500" : "text-amber-600")}>
+                        {b.gapDays7} gap day{b.gapDays7 !== 1 ? "s" : ""} / 7d
+                      </p>
+                      <p className="text-[9px] text-muted-foreground">{b.avg7DaySessions.toFixed(1)} avg/day</p>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -334,7 +364,7 @@ function SummaryTable({ data }: { data: DailyOverview }) {
     ["Phase 3–6 — Build / Sustain", String(data.phase4to6Count)],
     ["🟢 On Track for Improvement", String(ss.onTrack)],
     ["🟡 Stable — Holding Position", String(ss.stable)],
-    ["🔴 At Risk of Drop", String(ss.atRisk)],
+    ["🔍 Under Observation", String(ss.atRisk)],
     ["⏳ Too Early to Assess", String(ss.tooEarly)],
     ["Ranking sudden improvements (last run)", String(rs.suddenImprovements)],
     ["Ranking sudden drops (last run)", String(rs.suddenDrops)],
@@ -755,14 +785,22 @@ function BizTable({ businesses, search, byDateData }: {
         </div>
       )}
       <div className="rounded-xl border border-border overflow-hidden">
-        <table className="w-full text-xs">
+        <table className="w-full text-xs table-fixed">
+          <colgroup>
+            <col className="w-[36%]" />
+            <col className="w-[18%]" />
+            <col className="w-[16%]" />
+            <col className="w-[12%]" />
+            <col className="w-[10%]" />
+            <col className="w-[8%]" />
+          </colgroup>
           <thead className="bg-muted/50">
             <tr>
               <th className="text-left px-3 py-2.5 font-semibold text-muted-foreground">Business</th>
-              <th className="text-left px-3 py-2.5 font-semibold text-muted-foreground">Session Prediction</th>
-              <th className="text-left px-3 py-2.5 font-semibold text-muted-foreground">Ranking</th>
+              <th className="text-left px-3 py-2.5 font-semibold text-muted-foreground">Health Prediction</th>
+              <th className="text-left px-3 py-2.5 font-semibold text-muted-foreground">Ranking Status</th>
               <th className="text-left px-3 py-2.5 font-semibold text-muted-foreground">
-                {byDateData ? `Sessions (${fmt(byDateData.date)})` : "Today"}
+                {byDateData ? `Sessions ${fmt(byDateData.date)}` : "Sessions Today"}
               </th>
               <th className="text-left px-3 py-2.5 font-semibold text-muted-foreground">7d Avg</th>
               <th className="text-left px-3 py-2.5 font-semibold text-muted-foreground">Phase</th>
@@ -776,40 +814,76 @@ function BizTable({ businesses, search, byDateData }: {
               const sessVal  = dateRow ? dateRow.total : biz.sessionsToday;
               const sessGood = dateRow ? dateRow.successRate >= 0.9 : biz.sessionsToday >= biz.targetPerDay;
               const sessMid  = dateRow ? dateRow.successRate >= 0.6 : biz.sessionsToday > 0;
+              const noSessions = byDateData && !dateRow;
               return (
-                <tr key={i} className="hover:bg-muted/20">
-                  <td className="px-3 py-2 max-w-[200px]">
-                    {biz.clientName && <p className="text-[9px] text-muted-foreground truncate">👤 {biz.clientName}</p>}
-                    <p className="font-medium truncate text-foreground" title={biz.bizName}>{biz.bizName}</p>
-                    {biz.latestDate && <p className="text-[9px] text-muted-foreground">{biz.latestDate}</p>}
-                  </td>
-                  <td className="px-3 py-2">
-                    <div className="flex items-center gap-1">
-                      <div className={cn("w-1.5 h-1.5 rounded-full shrink-0", pCfg.dot)} />
-                      <span className={cn("text-[10px] font-medium", pCfg.text)}>{pCfg.emoji}</span>
-                      <span className="text-[10px] text-muted-foreground">{pCfg.label.split(" ")[0]}</span>
+                <tr key={i} className={cn("hover:bg-muted/20", noSessions && "bg-red-500/5")}>
+                  {/* Business name — full wrap, no truncation */}
+                  <td className="px-3 py-2.5">
+                    {biz.clientName && (
+                      <p className="text-[9px] text-muted-foreground mb-0.5">👤 {biz.clientName}</p>
+                    )}
+                    <p className="font-medium text-foreground leading-snug break-words">{biz.bizName}</p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      {biz.latestDate && <span className="text-[9px] text-muted-foreground">{biz.latestDate}</span>}
+                      {noSessions && (
+                        <span className="text-[9px] font-semibold text-red-500 bg-red-50 dark:bg-red-950/40 px-1.5 py-0.5 rounded">
+                          ⚠ No sessions {fmt(byDateData.date)}
+                        </span>
+                      )}
                     </div>
                   </td>
-                  <td className="px-3 py-2">
-                    <Badge variant="outline" className={cn("text-[9px]", rCfg.color)}>{rCfg.icon} {rCfg.label}</Badge>
+                  {/* Health prediction — full label */}
+                  <td className="px-3 py-2.5">
+                    <div className="flex items-start gap-1.5">
+                      <div className={cn("w-2 h-2 rounded-full shrink-0 mt-0.5", pCfg.dot)} />
+                      <div>
+                        <p className={cn("text-[10px] font-semibold leading-tight", pCfg.text)}>
+                          {pCfg.emoji} {pCfg.label}
+                        </p>
+                        {biz.gapDays7 > 0 && (
+                          <p className="text-[9px] text-muted-foreground">{biz.gapDays7} gap day{biz.gapDays7 > 1 ? "s" : ""}/7d</p>
+                        )}
+                      </div>
+                    </div>
                   </td>
-                  <td className="px-3 py-2">
+                  {/* Ranking */}
+                  <td className="px-3 py-2.5">
+                    <Badge variant="outline" className={cn("text-[9px] whitespace-normal leading-tight h-auto py-0.5", rCfg.color)}>
+                      {rCfg.icon} {rCfg.label}
+                    </Badge>
+                  </td>
+                  {/* Sessions count */}
+                  <td className="px-3 py-2.5">
                     {byDateData ? (
                       dateRow ? (
-                        <span className={cn("font-mono font-semibold",
-                          sessGood ? "text-emerald-500" : sessMid ? "text-amber-500" : "text-blue-500"
-                        )}>{sessVal} <span className="text-[9px] font-normal text-muted-foreground">({Math.round(dateRow.successRate * 100)}%)</span></span>
+                        <div>
+                          <span className={cn("font-mono font-bold text-sm",
+                            sessGood ? "text-emerald-500" : sessMid ? "text-amber-500" : "text-blue-500"
+                          )}>{sessVal}</span>
+                          <span className="text-[9px] text-muted-foreground block">{Math.round(dateRow.successRate * 100)}% ok</span>
+                        </div>
                       ) : (
-                        <span className="text-muted-foreground font-mono text-[10px]">no data</span>
+                        <span className="text-[10px] font-semibold text-red-400">0 ⚠</span>
                       )
                     ) : (
-                      <span className={cn("font-mono font-semibold",
-                        sessGood ? "text-emerald-500" : sessMid ? "text-amber-500" : "text-blue-500"
-                      )}>{sessVal}/{biz.targetPerDay}</span>
+                      <div>
+                        <span className={cn("font-mono font-bold text-sm",
+                          sessGood ? "text-emerald-500" : sessMid ? "text-amber-500" : "text-blue-500"
+                        )}>{sessVal}</span>
+                        <span className="text-[9px] text-muted-foreground block">/ {biz.targetPerDay} target</span>
+                      </div>
                     )}
                   </td>
-                  <td className="px-3 py-2 font-mono text-muted-foreground">{biz.avg7DaySessions.toFixed(1)}/d</td>
-                  <td className="px-3 py-2 text-muted-foreground">P{biz.phase}</td>
+                  {/* 7d avg */}
+                  <td className="px-3 py-2.5">
+                    <span className="font-mono text-muted-foreground">{biz.avg7DaySessions.toFixed(1)}</span>
+                    <span className="text-[9px] text-muted-foreground block">/day</span>
+                  </td>
+                  {/* Phase */}
+                  <td className="px-3 py-2.5">
+                    <span className="text-xs font-semibold text-muted-foreground">P{biz.phase}</span>
+                    <span className="text-[9px] text-muted-foreground block">{biz.phaseLabel?.replace("Phase ", "") ?? ""}</span>
+                  </td>
                 </tr>
               );
             })}
@@ -856,7 +930,7 @@ function PerBusinessReports({ businesses, parentSearch }: { businesses: BizRow[]
 
   const predPills: { key: Prediction | "all"; label: string; cls: string }[] = [
     { key: "all",      label: "All",       cls: "border-border text-muted-foreground hover:bg-secondary/60" },
-    { key: "AT_RISK",  label: "🚨 At Risk",  cls: "border-blue-300 text-blue-700 hover:bg-blue-50" },
+    { key: "AT_RISK",  label: "🔍 Under Observation",  cls: "border-blue-300 text-blue-700 hover:bg-blue-50" },
     { key: "STABLE",   label: "➡️ Stable",   cls: "border-amber-300 text-amber-700 hover:bg-amber-50" },
     { key: "ON_TRACK", label: "📈 On Track", cls: "border-emerald-300 text-emerald-700 hover:bg-emerald-50" },
     { key: "TOO_EARLY",label: "⏳ Too Early", cls: "border-slate-300 text-slate-600 hover:bg-slate-50" },
@@ -953,7 +1027,7 @@ function PerBusinessReports({ businesses, parentSearch }: { businesses: BizRow[]
 
 // ── Action Items Panel ─────────────────────────────────────────────────────────
 const PAGE_SIZE = 10;
-type SectionKey = "all" | "critical" | "monitor" | "atrisk" | "win";
+type SectionKey = "all" | "critical" | "monitor" | "atrisk" | "win" | "kwrotation";
 
 function ActionItemsPanel({ data, search: parentSearch }: { data: DailyOverview; search: string }) {
   const [localSearch, setLocalSearch] = useState("");
@@ -966,6 +1040,7 @@ function ActionItemsPanel({ data, search: parentSearch }: { data: DailyOverview;
   // ── Group all rank alerts by business ────────────────────────────────────────
   type BizAlertGroup = {
     bizName: string;
+    clientName?: string;
     drops:    RankAlert[];
     improves: RankAlert[];
     sessRisk: AtRiskBiz | undefined;
@@ -975,7 +1050,7 @@ function ActionItemsPanel({ data, search: parentSearch }: { data: DailyOverview;
   const groupMap = new Map<string, BizAlertGroup>();
   const ensure = (name: string) => {
     if (!groupMap.has(name)) groupMap.set(name, {
-      bizName: name, drops: [], improves: [], sessRisk: atRiskMap.get(name), isCritical: false,
+      bizName: name, clientName: bizMap.get(name)?.clientName, drops: [], improves: [], sessRisk: atRiskMap.get(name), isCritical: false,
     });
     return groupMap.get(name)!;
   };
@@ -993,7 +1068,7 @@ function ActionItemsPanel({ data, search: parentSearch }: { data: DailyOverview;
   // Session-only at-risk businesses (no rank alert)
   for (const b of data.atRiskBusinesses) {
     if (!groupMap.has(b.bizName)) {
-      groupMap.set(b.bizName, { bizName: b.bizName, drops: [], improves: [], sessRisk: b, isCritical: false });
+      groupMap.set(b.bizName, { bizName: b.bizName, clientName: bizMap.get(b.bizName)?.clientName, drops: [], improves: [], sessRisk: b, isCritical: false });
     }
   }
 
@@ -1003,7 +1078,7 @@ function ActionItemsPanel({ data, search: parentSearch }: { data: DailyOverview;
   );
 
   const criticalGroups = filtered.filter(g => g.drops.length > 0 && g.isCritical).sort((a, b) => b.drops.length - a.drops.length);
-  const monitorGroups  = filtered.filter(g => g.drops.length > 0 && !g.isCritical).sort((a, b) => b.drops.length - a.drops.length);
+  const monitorGroups = filtered.filter(g => g.drops.length > 0 && !g.isCritical && g.improves.length === 0).sort((a, b) => b.drops.length - a.drops.length);
   const atRiskGroups   = filtered.filter(g => g.drops.length === 0 && g.improves.length === 0 && g.sessRisk);
   const winGroups      = filtered.filter(g => g.improves.length > 0 && g.drops.length === 0).sort((a, b) => b.improves.length - a.improves.length);
 
@@ -1128,7 +1203,7 @@ function ActionItemsPanel({ data, search: parentSearch }: { data: DailyOverview;
     if (reappeared.length > 0) {
       recs.push(`Now that the business has re-appeared, push for top-5 position — increase session variety for the re-appeared keywords with different prompt angles to strengthen the ranking signal beyond just visibility.`);
     }
-    recs.push(`Use this as a template for the rest of the portfolio — document the session cadence, keyword focus, and prompt variety that drove this result and apply the same approach to businesses still in the "at risk" or "monitor" category.`);
+    recs.push(`Use this as a template for the rest of the portfolio — document the session cadence, keyword focus, and prompt variety that drove this result and apply the same approach to businesses still in the "under observation" or "monitor" category.`);
     recs.push(`Schedule a ranking check in 14 days specifically for ${platforms.join(", ")} to confirm the improvement held and quantify the next round of gains.`);
 
     return { overview, causes, recs };
@@ -1138,7 +1213,7 @@ function ActionItemsPanel({ data, search: parentSearch }: { data: DailyOverview;
     const biz = bizMap.get(b.bizName);
     const successPct = Math.round(b.avg7DaySuccessRate * 100);
 
-    const overview = `${b.bizName} is at risk of a ranking drop at the next bi-weekly run — session health metrics show ${
+    const overview = `${b.bizName} is under observation for a potential ranking drop at the next bi-weekly run — session health metrics show ${
       b.gapDays7 >= 3 ? `${b.gapDays7} days with zero sessions` :
       successPct < 80 ? `only ${successPct}% session success rate` :
       b.missedKeywords5Plus.length > 0 ? `${b.missedKeywords5Plus.length} keyword(s) not covered for 5+ days` :
@@ -1188,7 +1263,7 @@ function ActionItemsPanel({ data, search: parentSearch }: { data: DailyOverview;
   const sectionCfg = {
     critical: { icon: Zap,          label: "Immediate Action Required", bg: "bg-orange-50 dark:bg-orange-950/30",      border: "border-orange-300 dark:border-orange-800",     hdr: "bg-orange-100/60 dark:bg-orange-900/30",      tag: "bg-orange-100 text-orange-700",           badge: "bg-orange-100 text-orange-700 border-orange-300",           accent: "text-orange-600 dark:text-orange-400" },
     monitor:  { icon: Eye,           label: "Monitor Closely",            bg: "bg-sky-50 dark:bg-sky-950/30",       border: "border-sky-300 dark:border-sky-700",     hdr: "bg-sky-100/60 dark:bg-sky-900/30",      tag: "bg-sky-100 text-sky-700",           badge: "bg-sky-100 text-sky-700 border-sky-300",           accent: "text-sky-600 dark:text-sky-400" },
-    atrisk:   { icon: AlertTriangle, label: "At Risk — Session Health",   bg: "bg-amber-50 dark:bg-amber-950/30",  border: "border-amber-300 dark:border-amber-700", hdr: "bg-amber-100/60 dark:bg-amber-900/30",  tag: "bg-amber-100 text-amber-700",       badge: "bg-amber-100 text-amber-700 border-amber-300",     accent: "text-amber-600 dark:text-amber-400" },
+    atrisk:   { icon: AlertTriangle, label: "Under Observation — Session Health",   bg: "bg-amber-50 dark:bg-amber-950/30",  border: "border-amber-300 dark:border-amber-700", hdr: "bg-amber-100/60 dark:bg-amber-900/30",  tag: "bg-amber-100 text-amber-700",       badge: "bg-amber-100 text-amber-700 border-amber-300",     accent: "text-amber-600 dark:text-amber-400" },
     win:      { icon: Trophy,        label: "Improvements & Wins",        bg: "bg-emerald-50 dark:bg-emerald-950/30", border: "border-emerald-300 dark:border-emerald-700", hdr: "bg-emerald-100/60 dark:bg-emerald-900/30", tag: "bg-emerald-100 text-emerald-700", badge: "bg-emerald-100 text-emerald-700 border-emerald-300", accent: "text-emerald-600 dark:text-emerald-400" },
   };
 
@@ -1210,6 +1285,9 @@ function ActionItemsPanel({ data, search: parentSearch }: { data: DailyOverview;
       <div className={cn("rounded-xl border overflow-hidden shadow-sm", cfg.bg, cfg.border)}>
         {/* Header */}
         <div className={cn("px-5 py-3.5 border-b", cfg.border, cfg.hdr)}>
+          {g.clientName && g.clientName !== g.bizName && (
+            <p className="text-[10px] text-muted-foreground mb-0.5">👤 {g.clientName}</p>
+          )}
           <p className="text-sm font-bold text-foreground">{g.bizName}</p>
           <p className={cn("text-xs mt-0.5 leading-snug", cfg.accent)}>{narrative.overview}</p>
         </div>
@@ -1306,12 +1384,35 @@ function ActionItemsPanel({ data, search: parentSearch }: { data: DailyOverview;
     );
   }
 
+  // ── Keyword rotation gap list (filtered by search) ───────────────────────────
+  const kwRotationFiltered = (data.keywordRotationGap ?? []).filter(b =>
+    search === "" || b.bizName.toLowerCase().includes(search.toLowerCase()) || b.clientName.toLowerCase().includes(search.toLowerCase())
+  );
+  const kwRotationAtRisk    = kwRotationFiltered.filter(b => b.isAtRisk);
+  const kwRotationBelowOnly = kwRotationFiltered.filter(b => !b.isAtRisk);
+
   // ── Portfolio summary strip ───────────────────────────────────────────────────
   const totalDrop   = criticalGroups.length + monitorGroups.length;
   const totalRisk   = atRiskGroups.length;
   const totalWin    = winGroups.length;
+  const totalKwGap  = kwRotationFiltered.length;
   const topDropBiz  = criticalGroups[0] ?? monitorGroups[0];
   const topWinBiz   = winGroups[0];
+
+  // Dynamic rotation date labels derived from data
+  const kwRotDateRaw = (data.keywordRotationGap ?? [])[0]?.dailySessions[0]?.date ?? "";
+  const fmtKwDate = (iso: string) => {
+    if (!iso) return "";
+    const [, m, d] = iso.split("-");
+    const months = ["","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    return `${months[parseInt(m)]} ${parseInt(d)}`;
+  };
+  const addDaysKw = (iso: string, n: number) => {
+    const dt = new Date(iso + "T00:00:00"); dt.setDate(dt.getDate() + n); return dt.toISOString().slice(0, 10);
+  };
+  const kwTractionLabel = kwRotDateRaw
+    ? `${fmtKwDate(addDaysKw(kwRotDateRaw, 5))}–${fmtKwDate(addDaysKw(kwRotDateRaw, 7))}`
+    : "traction window";
 
   if (filtered.length === 0) {
     return (
@@ -1339,11 +1440,12 @@ function ActionItemsPanel({ data, search: parentSearch }: { data: DailyOverview;
       {/* Section filter pills */}
       <div className="flex gap-1.5 flex-wrap">
         {([
-          { key: "all",      label: "All",                       count: criticalGroups.length + monitorGroups.length + atRiskGroups.length + winGroups.length, cls: "border-border text-muted-foreground hover:bg-secondary/60" },
-          { key: "critical", label: "Immediate Action Required", count: criticalGroups.length, cls: "border-orange-300 text-orange-700 hover:bg-orange-50" },
-          { key: "monitor",  label: "Monitor Closely",           count: monitorGroups.length,  cls: "border-sky-300 text-sky-700 hover:bg-sky-50" },
-          { key: "atrisk",   label: "Session Risk",              count: atRiskGroups.length,   cls: "border-amber-300 text-amber-700 hover:bg-amber-50" },
-          { key: "win",      label: "Wins",                      count: winGroups.length,      cls: "border-emerald-300 text-emerald-700 hover:bg-emerald-50" },
+          { key: "all",        label: "All",                       count: criticalGroups.length + monitorGroups.length + atRiskGroups.length + winGroups.length + totalKwGap, cls: "border-border text-muted-foreground hover:bg-secondary/60" },
+          { key: "critical",   label: "Immediate Action",          count: criticalGroups.length, cls: "border-orange-300 text-orange-700 hover:bg-orange-50" },
+          { key: "monitor",    label: "Monitor Closely",           count: monitorGroups.length,  cls: "border-sky-300 text-sky-700 hover:bg-sky-50" },
+          { key: "atrisk",     label: "Under Observation",         count: atRiskGroups.length,   cls: "border-amber-300 text-amber-700 hover:bg-amber-50" },
+          { key: "kwrotation", label: "Keyword Rotation Gap",      count: totalKwGap,            cls: "border-purple-300 text-purple-700 hover:bg-purple-50" },
+          { key: "win",        label: "Wins",                      count: winGroups.length,      cls: "border-emerald-300 text-emerald-700 hover:bg-emerald-50" },
         ] as { key: SectionKey; label: string; count: number; cls: string }[]).map(f => (
           <button
             key={f.key}
@@ -1364,15 +1466,17 @@ function ActionItemsPanel({ data, search: parentSearch }: { data: DailyOverview;
         <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Portfolio Overview — Action Summary</p>
         <p className="text-sm text-foreground leading-relaxed">
           {totalDrop > 0 && <><span className="font-semibold text-orange-600">{totalDrop} business{totalDrop > 1 ? "es" : ""} with ranking drops</span>{totalDrop > 0 && topDropBiz && ` (most affected: ${topDropBiz.bizName} — ${topDropBiz.drops.length} keyword${topDropBiz.drops.length > 1 ? "s" : ""} dropped)`}. </>}
-          {totalRisk > 0 && <><span className="font-semibold text-amber-600">{totalRisk} business{totalRisk > 1 ? "es" : ""} at risk of a drop</span> at the next ranking run based on session health metrics. </>}
+          {totalRisk > 0 && <><span className="font-semibold text-amber-600">{totalRisk} business{totalRisk > 1 ? "es" : ""} under observation</span> for potential drops at the next ranking run based on session health metrics. </>}
+          {totalKwGap > 0 && <><span className="font-semibold text-purple-600">{totalKwGap} business{totalKwGap > 1 ? "es" : ""} below 8 sessions/day</span> on new keywords from the {fmtKwDate(kwRotDateRaw)} rotation — traction window expires {kwTractionLabel}. </>}
           {totalWin > 0 && <><span className="font-semibold text-emerald-600">{totalWin} business{totalWin > 1 ? "es" : ""} with sudden improvements</span>{topWinBiz && ` (top win: ${topWinBiz.bizName} — ${topWinBiz.improves.length} keyword${topWinBiz.improves.length > 1 ? "s" : ""} improved)`}. </>}
-          {totalDrop === 0 && totalRisk === 0 && totalWin === 0 && "All businesses are stable — no immediate actions required."}
+          {totalDrop === 0 && totalRisk === 0 && totalKwGap === 0 && totalWin === 0 && "All businesses are stable — no immediate actions required."}
         </p>
-        <div className="flex gap-4 pt-1">
+        <div className="flex gap-4 pt-1 flex-wrap">
           {[
             ["🚨", criticalGroups.length, "Critical"],
             ["🔍", monitorGroups.length, "Monitor"],
-            ["⚠️", atRiskGroups.length, "Session Risk"],
+            ["🔍", atRiskGroups.length, "Under Observation"],
+            ["🔄", totalKwGap, "KW Rotation"],
             ["✅", winGroups.length, "Wins"],
           ].map(([emoji, count, label]) => (
             <div key={label as string} className="text-center">
@@ -1386,7 +1490,227 @@ function ActionItemsPanel({ data, search: parentSearch }: { data: DailyOverview;
       {(sectionFilter === "all" || sectionFilter === "critical") && <Section groups={criticalGroups} sKey="critical" />}
       {(sectionFilter === "all" || sectionFilter === "monitor")  && <Section groups={monitorGroups}  sKey="monitor" />}
       {(sectionFilter === "all" || sectionFilter === "atrisk")   && <Section groups={atRiskGroups}   sKey="atrisk" />}
+      {(sectionFilter === "all" || sectionFilter === "kwrotation") && kwRotationFiltered.length > 0 && (
+        <KeywordRotationSection
+          atRisk={kwRotationAtRisk}
+          belowOnly={kwRotationBelowOnly}
+          rotationTotal={data.keywordRotationTotal}
+        />
+      )}
       {(sectionFilter === "all" || sectionFilter === "win")      && <Section groups={winGroups}      sKey="win" />}
+    </div>
+  );
+}
+
+// ── Missed Today Section ──────────────────────────────────────────────────────
+function MissedTodaySection({ businesses, asOfDate }: { businesses: BizRow[]; asOfDate: string }) {
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2 pt-1">
+        <span className="text-sm">⚫</span>
+        <p className="text-xs font-bold uppercase tracking-wide">Missed Today — Zero Sessions on {fmt(asOfDate)}</p>
+        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border border-red-300 bg-red-100 text-red-700">
+          {businesses.length} business{businesses.length > 1 ? "es" : ""}
+        </span>
+      </div>
+
+      <div className="rounded-xl border border-red-200 dark:border-red-800 bg-red-50/50 dark:bg-red-950/20 p-3 space-y-1.5">
+        <p className="text-[11px] text-red-700 dark:text-red-400 leading-relaxed">
+          These established businesses had <strong>zero sessions</strong> on {fmt(asOfDate)}. Each missed day breaks the daily signal to AI engines — the longer the gap, the higher the risk of position loss at the next ranking run.
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        {businesses.map((b, i) => {
+          const pCfg = PRED[b.prediction];
+          const isHighRisk = b.gapDays7 >= 3;
+          return (
+            <div key={i} className={cn(
+              "rounded-xl border p-4 space-y-2",
+              isHighRisk ? "border-red-300 bg-red-50 dark:bg-red-950/30" : "border-amber-200 bg-amber-50/40 dark:bg-amber-950/20"
+            )}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  {b.clientName && <p className="text-[9px] text-muted-foreground mb-0.5">👤 {b.clientName}</p>}
+                  <p className="text-sm font-bold text-foreground leading-snug break-words">{b.bizName}</p>
+                </div>
+                <div className="shrink-0 text-right">
+                  <p className={cn("text-xs font-semibold", pCfg.text)}>{pCfg.emoji} {pCfg.label}</p>
+                  <p className={cn("text-[10px] font-medium mt-0.5", isHighRisk ? "text-red-500" : "text-amber-600")}>
+                    {b.gapDays7} gap day{b.gapDays7 !== 1 ? "s" : ""} / last 7d
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-4 text-[10px] text-muted-foreground border-t border-border/40 pt-2">
+                <span>7d avg: <strong>{b.avg7DaySessions.toFixed(1)}/day</strong></span>
+                <span>Active: <strong>{b.daysActive} days</strong></span>
+                <span>Target: <strong>{b.targetPerDay}/day</strong></span>
+                {b.avg7DaySuccessRate < 1 && (
+                  <span className={cn(b.avg7DaySuccessRate < 0.8 ? "text-orange-500" : "")}>
+                    Success: <strong>{Math.round(b.avg7DaySuccessRate * 100)}%</strong>
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground leading-relaxed">{b.action}</p>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Keyword Rotation Gap Section ──────────────────────────────────────────────
+const KW_ROT_PAGE_SIZE = 25;
+function KeywordRotationSection({
+  atRisk, belowOnly, rotationTotal,
+}: { atRisk: KwRotationBiz[]; belowOnly: KwRotationBiz[]; rotationTotal: number }) {
+  const [page, setPage] = useState(0);
+  const all = [...atRisk, ...belowOnly];
+  const totalPages = Math.ceil(all.length / KW_ROT_PAGE_SIZE);
+  const pageItems  = all.slice(page * KW_ROT_PAGE_SIZE, (page + 1) * KW_ROT_PAGE_SIZE);
+
+  // Derive rotation date and traction window end from the actual daily session data
+  const rotationDateRaw = all[0]?.dailySessions[0]?.date ?? "";
+  const fmtShort = (iso: string) => {
+    if (!iso) return "";
+    const [, m, d] = iso.split("-");
+    const months = ["","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    return `${months[parseInt(m)]} ${parseInt(d)}`;
+  };
+  const addDaysLocal = (iso: string, n: number) => {
+    const dt = new Date(iso + "T00:00:00");
+    dt.setDate(dt.getDate() + n);
+    return dt.toISOString().slice(0, 10);
+  };
+  const rotationLabel = rotationDateRaw
+    ? `${fmtShort(rotationDateRaw)}, ${rotationDateRaw.slice(0, 4)}`
+    : "Rotation date unknown";
+  const tractionStart = rotationDateRaw ? addDaysLocal(rotationDateRaw, 5) : "";
+  const tractionEnd   = rotationDateRaw ? addDaysLocal(rotationDateRaw, 7) : "";
+  const tractionLabel = tractionStart && tractionEnd
+    ? `${fmtShort(tractionStart)}–${fmtShort(tractionEnd)}, ${tractionEnd.slice(0, 4)}`
+    : "TBD";
+
+  const onTargetCount = rotationTotal - all.length;
+  const avgPct = all.length > 0
+    ? Math.round((all.reduce((s, b) => s + b.avgSessionsPerDay, 0) / all.length) / 8 * 100)
+    : 0;
+
+  return (
+    <div className="space-y-3">
+      {/* Section header */}
+      <div className="flex items-center gap-2 pt-1">
+        <span className="text-sm">🔄</span>
+        <p className="text-xs font-bold uppercase tracking-wide">Keyword Rotation Gap — Below 8 Sessions/Day</p>
+        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border border-purple-300 bg-purple-100 text-purple-700">
+          {all.length} of {rotationTotal} rotated
+        </span>
+      </div>
+
+      {/* Context banner */}
+      <div className="rounded-xl border border-purple-300 dark:border-purple-700 bg-purple-50 dark:bg-purple-950/30 p-4 space-y-2">
+        <div className="flex items-start gap-2">
+          <span className="text-base shrink-0">📋</span>
+          <div className="space-y-1.5">
+            <p className="text-xs font-bold text-purple-800 dark:text-purple-300">
+              {rotationLabel} — Keyword Rotation Applied ({rotationTotal} businesses reached Top 1–3)
+            </p>
+            <p className="text-[11px] text-purple-700 dark:text-purple-400 leading-relaxed">
+              These businesses had their keywords rotated on {fmtShort(rotationDateRaw)} because they reached Top 1–3 positions on the old keywords.
+              New keywords require <strong>8 sessions/day</strong> — the current pace is at ~{avgPct}% of target across the gap businesses.
+              The 5–7 day traction window to assess new keyword performance expires <strong>{tractionLabel}</strong>.
+              If new keywords show no ranking traction by then, they need to be replaced again.
+            </p>
+            <div className="flex gap-4 pt-1">
+              <div className="text-center">
+                <p className="text-sm font-bold text-purple-800 dark:text-purple-200">{atRisk.length}</p>
+                <p className="text-[9px] text-purple-600">🚨 AT RISK (0-session days)</p>
+              </div>
+              <div className="text-center">
+                <p className="text-sm font-bold text-purple-800 dark:text-purple-200">{belowOnly.length}</p>
+                <p className="text-[9px] text-purple-600">⬇️ Below 8/day</p>
+              </div>
+              <div className="text-center">
+                <p className="text-sm font-bold text-purple-800 dark:text-purple-200">{rotationTotal - all.length}</p>
+                <p className="text-[9px] text-purple-600">✅ On Target (8+/day)</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Compact table — columns grow with daily data */}
+      {(() => {
+        const dateCols = all[0]?.dailySessions ?? [];
+        const colCount = dateCols.length;
+        const gridCols = `grid-cols-[1fr${Array(colCount).fill("_auto").join("")}_auto]`;
+        return (
+          <div className="rounded-xl border border-border overflow-hidden">
+            {/* Table header */}
+            <div className={cn("grid gap-0 bg-muted/50 border-b border-border px-3 py-2", gridCols)}>
+              <p className="text-[10px] font-bold uppercase text-muted-foreground">Client / Business</p>
+              {dateCols.map(dc => (
+                <p key={dc.date} className="text-[10px] font-bold uppercase text-muted-foreground text-center w-10">
+                  {new Date(dc.date + "T12:00:00Z").toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })}
+                </p>
+              ))}
+              <p className="text-[10px] font-bold uppercase text-muted-foreground text-right w-16">Avg/day</p>
+            </div>
+            {/* Table rows */}
+            <div className="divide-y divide-border/50">
+              {pageItems.map((b) => (
+                <div
+                  key={b.bizName}
+                  className={cn(
+                    "grid gap-0 items-center px-3 py-2",
+                    gridCols,
+                    b.isAtRisk ? "bg-amber-50/60 dark:bg-amber-950/20" : "bg-background hover:bg-muted/20"
+                  )}
+                >
+                  <div className="min-w-0">
+                    {b.clientName && b.clientName !== b.bizName && (
+                      <p className="text-[9px] text-muted-foreground truncate">👤 {b.clientName}</p>
+                    )}
+                    <p className="text-[11px] font-medium text-foreground truncate">{b.bizName}</p>
+                    {b.isAtRisk && (
+                      <span className="text-[9px] font-bold text-amber-600">⚠️ missed session day</span>
+                    )}
+                  </div>
+                  {b.dailySessions.map((ds, i) => (
+                    <p
+                      key={i}
+                      className={cn(
+                        "text-[11px] font-mono font-bold text-center w-10",
+                        ds.sessions === 0 ? "text-red-600" : ds.sessions >= 8 ? "text-emerald-600" : "text-amber-600"
+                      )}
+                    >
+                      {ds.sessions}
+                    </p>
+                  ))}
+                  <p className="text-[11px] font-mono font-bold text-right w-16">
+                    <span className="text-purple-600">{b.avgSessionsPerDay.toFixed(1)}</span>
+                    <span className="text-[9px] text-muted-foreground ml-0.5">/8</span>
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between pt-1">
+          <p className="text-[10px] text-muted-foreground">Page {page + 1} of {totalPages} · {all.length} total</p>
+          <div className="flex gap-1">
+            <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}
+              className="text-[10px] px-2.5 py-1 border border-border rounded disabled:opacity-40 hover:bg-secondary/60 transition-colors">← Prev</button>
+            <button onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page === totalPages - 1}
+              className="text-[10px] px-2.5 py-1 border border-border rounded disabled:opacity-40 hover:bg-secondary/60 transition-colors">Next →</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1603,6 +1927,14 @@ export function DailyOverviewPage() {
             <TabsTrigger value="summary" className="text-xs h-8 gap-1.5">
               <BarChart2 className="w-3 h-3" />Summary
             </TabsTrigger>
+            <TabsTrigger value="missed" className="text-xs h-8 gap-1.5">
+              <span className="w-3 h-3 text-[11px]">⚫</span>
+              Missed Today
+              {(() => {
+                const mc = data.businesses.filter(b => b.sessionsToday === 0 && b.daysActive >= 7).length;
+                return mc > 0 ? <span className="text-red-500 font-bold">({mc})</span> : null;
+              })()}
+            </TabsTrigger>
             <TabsTrigger value="actions" className="text-xs h-8 gap-1.5">
               <ClipboardList className="w-3 h-3" />
               Action Items
@@ -1626,11 +1958,11 @@ export function DailyOverviewPage() {
             <TabsTrigger value="backlinks" className="text-xs h-8 gap-1.5">
               <Link2 className="w-3 h-3" />
               Backlink Actions
-              {backlinkReport && (backlinkReport.immediateAction.length + backlinkReport.monitorClosely.length) > 0 && (
-                <span className="text-red-500 font-bold">
-                  ({backlinkReport.immediateAction.length + backlinkReport.monitorClosely.length})
-                </span>
-              )}
+              {backlinkReport && (() => {
+                const allActiveSet = new Set(data.businesses.filter(b => b.platformWindows.length > 0 && b.platformWindows.every((p: PlatformWindow) => p.status === "ACTIVE")).map(b => b.bizName));
+                const actionCount = backlinkReport.immediateAction.length + backlinkReport.monitorClosely.filter(i => !allActiveSet.has(i.bizName)).length;
+                return actionCount > 0 ? <span className="text-red-500 font-bold">({actionCount})</span> : null;
+              })()}
             </TabsTrigger>
             <TabsTrigger value="chat" className="text-xs h-8 gap-1.5">
               <MessageSquare className="w-3 h-3" />AI Chat
@@ -1645,7 +1977,7 @@ export function DailyOverviewPage() {
               <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground mb-3">Key Rules — Daily Session Health</p>
               <div className="space-y-2">
                 {[
-                  "5 sessions per campaign per day — maximum and target. Never run more.",
+                  "8 sessions per campaign per day — maximum and target. Never run more.",
                   "Random platform rotation per keyword per day is NORMAL — do not flag it.",
                   "Only flag a platform if it receives ZERO sessions for 3+ consecutive days across ALL keywords.",
                   "Success rate 90%+ = sessions reaching AI platforms correctly.",
@@ -1660,6 +1992,25 @@ export function DailyOverviewPage() {
                 ))}
               </div>
             </div>
+          </TabsContent>
+
+          {/* Missed Today tab */}
+          <TabsContent value="missed" className="mt-4">
+            {(() => {
+              const missed = data.businesses
+                .filter(b => b.sessionsToday === 0 && b.daysActive >= 7)
+                .sort((a, b) => b.gapDays7 - a.gapDays7);
+              if (missed.length === 0) {
+                return (
+                  <div className="text-center py-16 text-muted-foreground">
+                    <CheckCircle2 className="w-10 h-10 mx-auto mb-3 text-emerald-500" />
+                    <p className="text-sm font-semibold">All established businesses ran sessions on {fmt(data.asOfDate)}</p>
+                    <p className="text-xs mt-1">No active campaigns missed a session day.</p>
+                  </div>
+                );
+              }
+              return <MissedTodaySection businesses={missed} asOfDate={data.asOfDate} />;
+            })()}
           </TabsContent>
 
           {/* Action Items tab */}
@@ -1693,6 +2044,12 @@ export function DailyOverviewPage() {
                 </div>
 
                 {/* KPI tiles */}
+                {(() => {
+                  const allActiveSet = new Set(data.businesses.filter(b => b.platformWindows.length > 0 && b.platformWindows.every((p: PlatformWindow) => p.status === "ACTIVE")).map(b => b.bizName));
+                  const monitorNeedsAttention = backlinkReport.monitorClosely.filter(i => !allActiveSet.has(i.bizName));
+                  const resolvedCount = backlinkReport.resolved.length + backlinkReport.monitorClosely.filter(i => allActiveSet.has(i.bizName)).length;
+                  return (
+                <div className="space-y-4">
                 <div className="grid grid-cols-3 gap-3">
                   <div className="rounded-xl border-2 border-red-400/40 bg-red-500/5 p-4 text-center">
                     <div className="flex items-center justify-center gap-1.5 mb-1">
@@ -1707,16 +2064,16 @@ export function DailyOverviewPage() {
                       <Eye className="w-4 h-4 text-amber-500" />
                       <span className="text-[10px] font-bold uppercase text-amber-600">Monitor Closely</span>
                     </div>
-                    <p className="text-3xl font-bold text-amber-600">{backlinkReport.monitorClosely.length}</p>
-                    <p className="text-[10px] text-muted-foreground mt-1">partial detection — some platforms missed</p>
+                    <p className="text-3xl font-bold text-amber-600">{monitorNeedsAttention.length}</p>
+                    <p className="text-[10px] text-muted-foreground mt-1">partial detection + session gap</p>
                   </div>
                   <div className="rounded-xl border-2 border-emerald-400/40 bg-emerald-500/5 p-4 text-center">
                     <div className="flex items-center justify-center gap-1.5 mb-1">
                       <CheckCircle2 className="w-4 h-4 text-emerald-500" />
                       <span className="text-[10px] font-bold uppercase text-emerald-600">Resolved</span>
                     </div>
-                    <p className="text-3xl font-bold text-emerald-600">{backlinkReport.resolved.length}</p>
-                    <p className="text-[10px] text-muted-foreground mt-1">all injections detected successfully</p>
+                    <p className="text-3xl font-bold text-emerald-600">{resolvedCount}</p>
+                    <p className="text-[10px] text-muted-foreground mt-1">all platforms active</p>
                   </div>
                 </div>
 
@@ -1769,15 +2126,15 @@ export function DailyOverviewPage() {
                   </div>
                 )}
 
-                {/* Monitor Closely table */}
-                {backlinkReport.monitorClosely.length > 0 && (
+                {/* Monitor Closely table — only businesses where sessions also have a platform gap */}
+                {monitorNeedsAttention.length > 0 && (
                   <div className="rounded-xl border border-amber-400/30 overflow-hidden">
                     <div className="bg-amber-500/8 px-4 py-3 flex items-center gap-2 border-b border-amber-400/20">
                       <Eye className="w-4 h-4 text-amber-500 shrink-0" />
                       <div>
                         <p className="text-sm font-bold text-amber-700">Monitor Closely — Partial Detection</p>
                         <p className="text-[10px] text-muted-foreground">
-                          {backlinkReport.monitorClosely.length} businesses — at least one injection detected but some platforms missed
+                          {monitorNeedsAttention.length} businesses — partial backlink detection with session platform gap
                         </p>
                       </div>
                     </div>
@@ -1793,7 +2150,7 @@ export function DailyOverviewPage() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border/30">
-                          {backlinkReport.monitorClosely.map((item) => (
+                          {monitorNeedsAttention.map((item) => (
                             <tr key={item.bizName} className="hover:bg-amber-500/5">
                               <td className="px-4 py-2.5 font-semibold max-w-[180px]">
                                 <p className="truncate" title={item.bizName}>{item.bizName}</p>
@@ -1838,6 +2195,9 @@ export function DailyOverviewPage() {
                     </p>
                   </div>
                 )}
+                </div>
+                  );
+                })()}
               </>
             )}
           </TabsContent>
@@ -1850,7 +2210,7 @@ export function DailyOverviewPage() {
               <div className="space-y-2">
                 <p className="text-xs font-bold text-blue-600 flex items-center gap-1.5">
                   <TrendingDown className="w-3.5 h-3.5" />
-                  Sessions At Risk — {data.atRiskBusinesses.length} businesses
+                  Under Observation — {data.atRiskBusinesses.length} businesses
                 </p>
                 {data.atRiskBusinesses
                   .filter((b) => search === "" || b.bizName.toLowerCase().includes(search.toLowerCase()))

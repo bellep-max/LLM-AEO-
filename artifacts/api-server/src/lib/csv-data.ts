@@ -39,6 +39,10 @@ export function reactivateBusiness(bizName: string): boolean {
   return true;
 }
 
+export function clearCache(): void {
+  _rankings = null; _dailyAnalysis = null; _aeoAnalysis = null; _variantMap = null;
+}
+
 // ── CSV parser ─────────────────────────────────────────────────────────────────
 
 function parseLine(line: string): string[] {
@@ -290,7 +294,7 @@ export interface BusinessDailyAnalysis {
   clientName: string;
   campaignName: string;
   numCampaigns: number;
-  targetPerDay: number;           // numCampaigns × 5
+  targetPerDay: number;           // numCampaigns × 8
   allKeywords: string[];
   daysActive: number;             // calendar days since first session
   totalSessions: number;
@@ -362,21 +366,23 @@ function computePrediction(a: {
 
   const silentPlatform5 = a.platformWindows.find((p) => p.consecutiveDaysSilent >= 5);
   const silentPlatform3 = a.platformWindows.find((p) => p.consecutiveDaysSilent >= 3);
-  const isAtRisk = a.gapDays7 >= 2 || a.avg7DaySuccessRate < 0.70 || a.missedKeywords5Plus.length > 0 || !!silentPlatform5;
+  // AT_RISK only from real session health problems — gaps, low success rate, or a silent platform.
+  // Keyword-only rotation gaps do NOT trigger AT_RISK when sessions are healthy.
+  const hasSessionHealthIssue = a.gapDays7 >= 2 || a.avg7DaySuccessRate < 0.70 || !!silentPlatform5;
+  const isAtRisk = hasSessionHealthIssue;
   const isOnTrack = !isAtRisk && a.gapDays7 === 0 && a.avg7DaySuccessRate >= 0.90 && a.missedKeywords3Plus.length === 0 && !silentPlatform3;
 
   if (isAtRisk) {
     const reasons: string[] = [];
     if (a.gapDays7 >= 2) reasons.push(`${a.gapDays7} days with zero sessions in the last 7`);
     if (a.avg7DaySuccessRate < 0.70) reasons.push(`success rate critically low at ${(a.avg7DaySuccessRate * 100).toFixed(0)}%`);
-    if (a.missedKeywords5Plus.length) reasons.push(`keyword${a.missedKeywords5Plus.length > 1 ? "s" : ""} "${a.missedKeywords5Plus[0]}" not hit in 5+ days`);
     if (silentPlatform5) reasons.push(`${silentPlatform5.platform} has received zero sessions for ${silentPlatform5.consecutiveDaysSilent} consecutive days`);
 
     const actions: string[] = [];
     if (a.gapDays7 >= 2) actions.push("Eliminate all session gaps immediately — run sessions every single day without exception.");
     if (a.avg7DaySuccessRate < 0.70) actions.push("Fix session errors before the next ranking run — 1 in 3 sessions is currently failing.");
     if (silentPlatform5) actions.push(`Ensure ${silentPlatform5.platform} receives sessions today — it has been silent too long.`);
-    if (a.missedKeywords5Plus.length) actions.push(`Re-cover keyword: "${a.missedKeywords5Plus[0]}" immediately.`);
+    if (a.missedKeywords5Plus.length) actions.push(`Re-cover keyword: "${a.missedKeywords5Plus[0]}" in upcoming sessions.`);
 
     return {
       prediction: "AT_RISK", predictionLabel: "At Risk of Drop", predictionEmoji: "🚨",
@@ -397,14 +403,16 @@ function computePrediction(a: {
   const stableReasons: string[] = [];
   if (a.gapDays7 === 1) stableReasons.push("1 session gap in the last 7 days");
   if (a.avg7DaySuccessRate >= 0.70 && a.avg7DaySuccessRate < 0.90) stableReasons.push(`success rate is ${(a.avg7DaySuccessRate * 100).toFixed(0)}% — just below the 90% target`);
-  if (a.missedKeywords3Plus.length) stableReasons.push(`keyword "${a.missedKeywords3Plus[0]}" not hit in 3+ days`);
+  if (a.missedKeywords5Plus.length) stableReasons.push(`keyword "${a.missedKeywords5Plus[0]}" not hit in 5+ days — rotate this keyword back into upcoming sessions`);
+  else if (a.missedKeywords3Plus.length) stableReasons.push(`keyword "${a.missedKeywords3Plus[0]}" not hit in 3+ days`);
   if (silentPlatform3) stableReasons.push(`${silentPlatform3.platform} silent for ${silentPlatform3.consecutiveDaysSilent} days`);
 
   const worstKpi = a.avg7DaySuccessRate < 0.90 ? "success rate" : a.gapDays7 > 0 ? "session consistency" : "keyword coverage";
+  const fallbackReason = stableReasons.length ? stableReasons.join(" and ") : "some keywords need more rotation coverage";
 
   return {
     prediction: "STABLE", predictionLabel: "Stable — Holding Position", predictionEmoji: "➡️",
-    why: "Sessions are running consistently but " + stableReasons.join(" and ") + ". Enough to hold position but not enough to push for improvement.",
+    why: "Sessions are running consistently but " + fallbackReason + ". Enough to hold position but not enough to push for improvement.",
     action: `Investigate why ${worstKpi} is below target. Fixing this one KPI could be enough to push from stable to improvement on the next ranking run.`,
   };
 }
@@ -512,18 +520,20 @@ function loadDailyAnalysis(): BusinessDailyAnalysis[] {
     const totalSessions = [...bd.days.values()].reduce((s, d) => s + d.total, 0);
     // Use campaign_id count (correct); fall back to 1 if no campaign_ids found
     const numCampaigns = Math.max(bd.campaignIds.size, 1);
-    const targetPerDay = numCampaigns * 5;
+    const targetPerDay = numCampaigns * 8;
     const { phase, label: phaseLabel } = phaseFromDays(daysActive);
 
     // Latest day
     const latestDay = bd.days.get(latestDate) ?? null;
 
     // 7-day rolling window: last 7 calendar days from latestDate
+    // Only count days on or after firstDate as potential gap days (pre-launch days are not gaps)
     let win7Total = 0, win7Success = 0, gapDays7 = 0;
     const last7Dates: string[] = [];
     for (let i = 0; i < 7; i++) {
       const d = addDays(latestDate, -i);
       last7Dates.push(d);
+      if (d < firstDate) continue;
       const rec = bd.days.get(d);
       if (!rec || rec.total === 0) { gapDays7++; }
       else { win7Total += rec.total; win7Success += rec.success; }
@@ -548,12 +558,13 @@ function loadDailyAnalysis(): BusinessDailyAnalysis[] {
     const missedKeywords5Plus = keywordCoverages.filter((k) => k.daysSinceLastHit >= 5).map((k) => k.keyword);
 
     // Platform windows (3-day and 5-day)
+    // Stop counting consecutive silent days once we reach a day before firstDate — pre-launch days are not silence.
     const platformWindows: PlatformWindow[] = PLATFORMS.map((p) => {
       let sessions3 = 0, sessions5 = 0;
-      // consecutive silent days from latest
       let consecutiveSilent = 0;
       for (let i = 0; i <= 30; i++) {
         const d = addDays(latestDate, -i);
+        if (d < firstDate) break;
         const rec = bd.days.get(d);
         const cnt = rec?.platforms[p] ?? 0;
         if (i < 3) sessions3 += cnt;
@@ -578,8 +589,8 @@ function loadDailyAnalysis(): BusinessDailyAnalysis[] {
     const lastRankDate = rankMap.get(bizName);
     const nextRankingRunDue = lastRankDate ? addDays(lastRankDate, 14) : addDays(firstDate, 14);
 
-    // Recent days (last 14 serializable)
-    const recentDays = allDates.slice(-14).map((d) => {
+    // Recent days (last 30 serializable — needs 30 for accurate platform-silence window in recomputeForDate)
+    const recentDays = allDates.slice(-30).map((d) => {
       const rec = bd.days.get(d)!;
       return { ...rec, keywords: [...rec.keywords] };
     });
@@ -676,6 +687,14 @@ export interface DailyOverviewData {
     allKeywords: string[];
     successRateToday: number;
   }>;
+  // Businesses that got keyword rotation on 2026-06-06 and are running below 8 sessions/day
+  keywordRotationGap: Array<{
+    bizName: string; clientName: string;
+    // Per-day session counts from rotation date to asOfDate
+    dailySessions: Array<{ date: string; sessions: number }>;
+    avgSessionsPerDay: number; gapPerDay: number; isAtRisk: boolean;
+  }>;
+  keywordRotationTotal: number; // total businesses that had rotation (including those on target)
 }
 
 export function getAsOfDate(): string {
@@ -706,9 +725,11 @@ function recomputeForDate(biz: BusinessDailyAnalysis, asOfDate: string): Busines
   const totalSessions = Math.max(biz.totalSessions - sessionsAfter, 0);
 
   // 7-day rolling window ending on asOfDate
+  // Skip days before firstDate — pre-launch days are not gaps
   let win7Total = 0, win7Success = 0, gapDays7 = 0;
   for (let i = 0; i < 7; i++) {
     const d = addDays(asOfDate, -i);
+    if (biz.firstDate && d < biz.firstDate) continue;
     const rec = dayMap.get(d);
     if (!rec || rec.total === 0) gapDays7++;
     else { win7Total += rec.total; win7Success += rec.success; }
@@ -731,10 +752,15 @@ function recomputeForDate(biz: BusinessDailyAnalysis, asOfDate: string): Busines
   const missedKeywords5Plus = keywordCoverages.filter((k) => k.daysSinceLastHit >= 5).map((k) => k.keyword);
 
   // Platform windows ending on asOfDate
+  // Stop at firstDate (pre-launch) or at the edge of the recentDays window (no data = can't count silence).
+  const earliestInMap = biz.recentDays.length > 0 ? biz.recentDays[0].date : (biz.firstDate ?? "");
   const platformWindows: PlatformWindow[] = PLATFORMS.map((p) => {
     let sessions3 = 0, sessions5 = 0, consecutiveSilent = 0;
     for (let i = 0; i <= 30; i++) {
-      const cnt = dayMap.get(addDays(asOfDate, -i))?.platforms[p] ?? 0;
+      const d = addDays(asOfDate, -i);
+      if (biz.firstDate && d < biz.firstDate) break;
+      if (d < earliestInMap) break; // beyond our data window — can't reliably count silence
+      const cnt = dayMap.get(d)?.platforms[p] ?? 0;
       if (i < 3) sessions3 += cnt;
       if (i < 5) sessions5 += cnt;
       if (cnt === 0) consecutiveSilent++;
@@ -872,7 +898,7 @@ function buildDailyOverview(sessions: BusinessDailyAnalysis[], asOfDate: string)
       latestRankDate: rank?.latestRunDate ?? "",
       sessionsToday: sess?.sessionsToday ?? 0,
       successRateToday: sess?.successRateToday ?? 0,
-      targetPerDay: sess?.targetPerDay ?? 5,
+      targetPerDay: sess?.targetPerDay ?? 8,
       avg7DaySessions: Math.round((sess?.avg7DaySessions ?? 0) * 10) / 10,
       avg7DaySuccessRate: sess?.avg7DaySuccessRate ?? 0,
       gapDays7: sess?.gapDays7 ?? 0,
@@ -902,6 +928,44 @@ function buildDailyOverview(sessions: BusinessDailyAnalysis[], asOfDate: string)
     return diff !== 0 ? diff : a.bizName.localeCompare(b.bizName);
   });
 
+  // ── Keyword rotation gap (Jun 6, 2026) ────────────────────────────────────────
+  // Businesses that had their keywords rotated on Jun 6 (reached Top 1-3 on old keywords)
+  // and are running below the required 8 sessions/day on the new keywords.
+  // Window: Jun 6 → asOfDate (grows as new daily CSVs are imported).
+  const KW_ROTATION_DATE = "2026-06-06";
+  const rotatedSet = new Set<string>(
+    rankings
+      .filter(r =>
+        r.keywords.some(kw => kw.runs.some(run => run.date < KW_ROTATION_DATE)) &&
+        r.keywords.some(kw => kw.firstRunDate === KW_ROTATION_DATE)
+      )
+      .map(r => r.bizName)
+  );
+  const keywordRotationGap: DailyOverviewData["keywordRotationGap"] = [];
+  // Build date range: KW_ROTATION_DATE … asOfDate (inclusive)
+  const rotationDates: string[] = [];
+  for (let d = KW_ROTATION_DATE; d <= asOfDate; d = addDays(d, 1)) rotationDates.push(d);
+  for (const biz of sessions) {
+    if (!rotatedSet.has(biz.bizName)) continue;
+    const dayMap = new Map(biz.recentDays.map(d => [d.date, d.total]));
+    const dailySessions = rotationDates.map(d => ({ date: d, sessions: dayMap.get(d) ?? 0 }));
+    const totalSess = dailySessions.reduce((s, d) => s + d.sessions, 0);
+    const avg = totalSess / rotationDates.length;
+    if (avg < 8) {
+      keywordRotationGap.push({
+        bizName: biz.bizName, clientName: biz.clientName,
+        dailySessions,
+        avgSessionsPerDay: Math.round(avg * 10) / 10,
+        gapPerDay: Math.round((8 - avg) * 10) / 10,
+        isAtRisk: dailySessions.some(d => d.sessions === 0),
+      });
+    }
+  }
+  keywordRotationGap.sort((a, b) => {
+    if (a.isAtRisk !== b.isAtRisk) return a.isAtRisk ? -1 : 1;
+    return b.gapPerDay - a.gapPerDay || a.bizName.localeCompare(b.bizName);
+  });
+
   return {
     asOfDate,
     totalBusinesses: sessions.length,
@@ -919,13 +983,14 @@ function buildDailyOverview(sessions: BusinessDailyAnalysis[], asOfDate: string)
       return (p[a.label] ?? 9) - (p[b.label] ?? 9);
     }),
     businesses,
+    keywordRotationGap,
+    keywordRotationTotal: rotatedSet.size,
   };
 }
 
 export function getDailyOverview(): DailyOverviewData {
-  const sessions = getAllDailyAnalysis();
   const asOfDate = getAsOfDate();
-  return buildDailyOverview(sessions, asOfDate);
+  return getDailyOverviewForDate(asOfDate);
 }
 
 /** Returns all businesses with health metrics recomputed as of the given date. */
@@ -1377,12 +1442,18 @@ export function getBacklinkActionItems(date: string): BacklinkActionReport {
   const rows = parseCSV(filePath);
   const injected = rows.filter(r => r["backlink_injected"]?.toLowerCase() === "true");
 
+  // Build a biz→clientName lookup from master session data (has human-readable names;
+  // individual daily CSVs store numeric IDs in client_name)
+  const _masterData = getAllDailyAnalysis();
+  const bizClientLookup = new Map(_masterData.map(b => [b.bizName, b.clientName]));
+
   // Group by business
   const bizMap = new Map<string, { clientName: string; sessions: Array<{ platform: string; found: boolean; url: string }> }>();
   for (const r of injected) {
     const biz = r["biz_name"]?.trim();
     if (!biz) continue;
-    if (!bizMap.has(biz)) bizMap.set(biz, { clientName: r["client_name"]?.trim() ?? "", sessions: [] });
+    const clientName = bizClientLookup.get(biz) ?? r["client_name"]?.trim() ?? "";
+    if (!bizMap.has(biz)) bizMap.set(biz, { clientName, sessions: [] });
     bizMap.get(biz)!.sessions.push({
       platform: normPlatform(r["platform"] ?? r["ai_platform"] ?? ""),
       found: r["backlink_found"]?.toLowerCase() === "true",
@@ -1413,9 +1484,28 @@ export function getBacklinkActionItems(date: string): BacklinkActionReport {
     else resolved.push(item);
   }
 
+  // If a PARTIAL business has all 3 platforms ACTIVE in session data, it doesn't need
+  // monitoring — the backlink miss is a rotation gap, not a session health problem.
+  // Move those from monitorClosely → resolved.
+  const platformActiveSet = new Set<string>();
+  for (const biz of _masterData) {
+    const windows = biz.platformWindows ?? [];
+    if (windows.length > 0 && windows.every((w: { status: string }) => w.status === "ACTIVE")) {
+      platformActiveSet.add(biz.bizName);
+    }
+  }
+  const monitorCloselyFiltered: BacklinkActionItem[] = [];
+  for (const item of monitorClosely) {
+    if (platformActiveSet.has(item.bizName)) {
+      resolved.push(item);
+    } else {
+      monitorCloselyFiltered.push(item);
+    }
+  }
+
   // Sort immediate action by most injections (highest effort wasted first)
   immediateAction.sort((a, b) => b.injectedCount - a.injectedCount);
-  monitorClosely.sort((a, b) => (b.injectedCount - b.foundCount) - (a.injectedCount - a.foundCount));
+  monitorCloselyFiltered.sort((a, b) => (b.injectedCount - b.foundCount) - (a.injectedCount - a.foundCount));
   resolved.sort((a, b) => a.bizName.localeCompare(b.bizName));
 
   const totalInjectedSessions = injected.length;
@@ -1429,7 +1519,7 @@ export function getBacklinkActionItems(date: string): BacklinkActionReport {
     totalFoundSessions,
     detectionRate: totalInjectedSessions > 0 ? totalFoundSessions / totalInjectedSessions : 0,
     immediateAction,
-    monitorClosely,
+    monitorClosely: monitorCloselyFiltered,
     resolved,
   };
 }

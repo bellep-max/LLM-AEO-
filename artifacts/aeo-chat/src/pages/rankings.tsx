@@ -114,7 +114,7 @@ const LABEL_CONFIG: Record<RankLabel, { label: string; color: string; icon: stri
 };
 
 const PRED_CONFIG: Record<Prediction, { color: string; icon: string; label: string }> = {
-  AT_RISK:   { color: "bg-blue-500/15 text-blue-700 border-blue-500/30",          icon: "🚨", label: "At Risk" },
+  AT_RISK:   { color: "bg-blue-500/15 text-blue-700 border-blue-500/30",          icon: "🔍", label: "Under Observation" },
   STABLE:    { color: "bg-amber-500/15 text-amber-700 border-amber-500/30",       icon: "➡️", label: "Stable" },
   ON_TRACK:  { color: "bg-emerald-500/15 text-emerald-700 border-emerald-500/30", icon: "📈", label: "On Track" },
   TOO_EARLY: { color: "bg-slate-500/15 text-slate-500 border-slate-400/30",       icon: "⏳", label: "Too Early" },
@@ -470,11 +470,11 @@ function CrossPlatformSummary({ platformLabels, bestRanks, daysSinceLastRun, tot
   );
 }
 
-// ── Alerts panel ───────────────────────────────────────────────────────────────
+// ── Drops panel ────────────────────────────────────────────────────────────────
 function AlertsPanel({ keywords }: { keywords: KeywordRank[] }) {
-  const ALERT_LABELS: RankLabel[] = ["SUDDEN_DROP", "NOT_FOUND_CRITICAL", "STEADY_DROP"];
+  const DROP_LABELS: RankLabel[] = ["SUDDEN_DROP", "NOT_FOUND_CRITICAL", "STEADY_DROP"];
   const alerts = keywords
-    .filter((k) => ALERT_LABELS.includes(k.label))
+    .filter((k) => DROP_LABELS.includes(k.label))
     .sort((a, b) => {
       const pri: Record<RankLabel, number> = {
         NOT_FOUND_CRITICAL: 0, SUDDEN_DROP: 1, STEADY_DROP: 2,
@@ -486,7 +486,7 @@ function AlertsPanel({ keywords }: { keywords: KeywordRank[] }) {
   if (!alerts.length) {
     return (
       <p className="text-[11px] text-muted-foreground flex items-center gap-1.5 py-1">
-        <span className="text-emerald-500">✓</span> No alerts — performing as expected.
+        <span className="text-emerald-500">✓</span> No drops — performing as expected.
       </p>
     );
   }
@@ -1410,6 +1410,8 @@ export function RankingsPage() {
   const [filterLabel, setFilterLabel] = useState<string>("all");
   const [aeoMap, setAeoMap] = useState<Map<string, AEOBizSummary>>(new Map());
   const [chatOpen, setChatOpen] = useState(false);
+  const [rankingDates, setRankingDates] = useState<string[]>([]);
+  const [selectedDate, setSelectedDate] = useState<string>("");
 
   const [selected, setSelected] = useState<string | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
@@ -1427,6 +1429,13 @@ export function RankingsPage() {
         const m = new Map<string, AEOBizSummary>();
         for (const b of d.businesses ?? []) m.set(b.bizName, b);
         setAeoMap(m);
+      })
+      .catch(() => {});
+    fetch("/api/csv/rankings/dates")
+      .then(r => r.json())
+      .then((d: { dates: string[] }) => {
+        setRankingDates(d.dates ?? []);
+        if (d.dates?.length) setSelectedDate(d.dates[0]);
       })
       .catch(() => {});
   }, []);
@@ -1448,13 +1457,23 @@ export function RankingsPage() {
     }
   }
 
-  const ALERT_LABELS: RankLabel[] = ["SUDDEN_DROP", "NOT_FOUND_CRITICAL", "STEADY_DROP"];
-  const alertCount = businesses.filter((b) => ALERT_LABELS.includes(b.overallLabel)).length;
+  const DROP_LABELS: RankLabel[] = ["SUDDEN_DROP", "NOT_FOUND_CRITICAL", "STEADY_DROP"];
+  const dropCount = businesses.filter((b) => DROP_LABELS.includes(b.overallLabel)).length;
+  const improveCount = businesses.filter((b) => b.overallLabel === "STEADY_IMPROVEMENT" || b.overallLabel === "SUDDEN_IMPROVEMENT").length;
+  const stableCount  = businesses.filter((b) => b.overallLabel === "NO_CHANGE").length;
 
-  const filtered = businesses.filter((b) => {
+  // Date filter: when a date is chosen, only show businesses whose latest run is that date OR
+  // that have any keyword run on that exact date.
+  const dateFilteredBiz = selectedDate
+    ? businesses.filter((b) => b.latestRunDate === selectedDate || b.firstRunDate === selectedDate)
+    : businesses;
+
+  const filtered = dateFilteredBiz.filter((b) => {
     const matchSearch = b.bizName.toLowerCase().includes(search.toLowerCase());
     const matchLabel = filterLabel === "all" || b.overallLabel === filterLabel ||
-      (filterLabel === "alerts" && ALERT_LABELS.includes(b.overallLabel));
+      (filterLabel === "drops" && DROP_LABELS.includes(b.overallLabel)) ||
+      (filterLabel === "improved" && (b.overallLabel === "STEADY_IMPROVEMENT" || b.overallLabel === "SUDDEN_IMPROVEMENT")) ||
+      (filterLabel === "stable" && b.overallLabel === "NO_CHANGE");
     return matchSearch && matchLabel;
   });
 
@@ -1469,12 +1488,34 @@ export function RankingsPage() {
             <Badge variant="outline" className="text-[10px] ml-auto">Bi-weekly</Badge>
           </div>
 
+          {/* Date calendar — select ranking run date */}
+          <div className="flex items-center gap-1.5">
+            <Calendar className="w-3 h-3 text-muted-foreground shrink-0" />
+            {rankingDates.length > 0 ? (
+              <select
+                value={selectedDate}
+                onChange={(e) => { setSelectedDate(e.target.value); setSelected(null); setDetail(null); }}
+                className="text-[11px] border border-border rounded px-1.5 py-1 bg-background text-foreground flex-1 cursor-pointer"
+              >
+                {rankingDates.map((d) => (
+                  <option key={d} value={d}>
+                    {new Date(d + "T12:00:00Z").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span className="text-[11px] text-muted-foreground">Loading dates…</span>
+            )}
+          </div>
+
+          {/* Filter pills */}
           <div className="flex gap-1.5 flex-wrap">
             {[
-              { key: "all",               label: "All" },
-              { key: "alerts",            label: `🚨 Alerts (${alertCount})` },
-              { key: "SUDDEN_IMPROVEMENT", label: "✅ Sudden ↑" },
-              { key: "BASELINE",           label: "⏳ Baseline" },
+              { key: "all",      label: `All (${dateFilteredBiz.length})` },
+              { key: "drops",    label: `📉 Drops (${dropCount})` },
+              { key: "improved", label: `📈 Improved (${improveCount})` },
+              { key: "stable",   label: `➡️ Stable (${stableCount})` },
+              { key: "BASELINE", label: "⏳ Baseline" },
             ].map(({ key, label }) => (
               <button key={key} onClick={() => setFilterLabel((p) => (p === key ? "all" : key))}
                 className={cn("text-[10px] rounded border px-2 py-0.5 transition-colors",
@@ -1493,7 +1534,7 @@ export function RankingsPage() {
               onChange={(e) => setSearch(e.target.value)} className="pl-8 h-8 text-xs" />
           </div>
           {!loading && (
-            <p className="text-[10px] text-muted-foreground">{filtered.length} of {businesses.length} businesses</p>
+            <p className="text-[10px] text-muted-foreground">{filtered.length} of {dateFilteredBiz.length} shown · {businesses.length} total</p>
           )}
         </div>
 

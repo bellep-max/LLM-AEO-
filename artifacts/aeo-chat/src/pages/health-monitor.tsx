@@ -770,7 +770,19 @@ export function HealthMonitorPage() {
                 )}
 
                 {/* ── Backlink Action Panel ───────────────────────────────── */}
-                {backlinkReport && backlinkReport.totalBusinessesWithInjected > 0 && (
+                {backlinkReport && backlinkReport.totalBusinessesWithInjected > 0 && (() => {
+                  // Build a map of biz -> all-platforms-active from session data
+                  const allActiveSet = new Set(
+                    businesses
+                      .filter(b => b.platformWindows.length > 0 && b.platformWindows.every(p => p.status === "ACTIVE"))
+                      .map(b => b.bizName)
+                  );
+                  // Monitor Closely: only show businesses where at least one platform is NOT active
+                  const monitorNeedsAttention = backlinkReport.monitorClosely.filter(item => !allActiveSet.has(item.bizName));
+                  const monitorSessionsOk    = backlinkReport.monitorClosely.filter(item =>  allActiveSet.has(item.bizName));
+                  const resolvedCount = backlinkReport.resolved.length + monitorSessionsOk.length;
+
+                  return (
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
                       <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
@@ -797,16 +809,16 @@ export function HealthMonitorPage() {
                           <Eye className="w-3.5 h-3.5 text-amber-500" />
                           <span className="text-[10px] font-bold uppercase text-amber-600">Monitor Closely</span>
                         </div>
-                        <p className="text-2xl font-bold text-amber-600">{backlinkReport.monitorClosely.length}</p>
-                        <p className="text-[10px] text-muted-foreground mt-0.5">partial detection — some missed</p>
+                        <p className="text-2xl font-bold text-amber-600">{monitorNeedsAttention.length}</p>
+                        <p className="text-[10px] text-muted-foreground mt-0.5">partial detection + session gap</p>
                       </div>
                       <div className="rounded-lg border-2 border-emerald-400/40 bg-emerald-500/5 p-3 text-center">
                         <div className="flex items-center justify-center gap-1 mb-1">
                           <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
                           <span className="text-[10px] font-bold uppercase text-emerald-600">Resolved</span>
                         </div>
-                        <p className="text-2xl font-bold text-emerald-600">{backlinkReport.resolved.length}</p>
-                        <p className="text-[10px] text-muted-foreground mt-0.5">all injections detected</p>
+                        <p className="text-2xl font-bold text-emerald-600">{resolvedCount}</p>
+                        <p className="text-[10px] text-muted-foreground mt-0.5">all platforms active</p>
                       </div>
                     </div>
 
@@ -836,17 +848,17 @@ export function HealthMonitorPage() {
                       </div>
                     )}
 
-                    {/* Monitor Closely list */}
-                    {backlinkReport.monitorClosely.length > 0 && (
+                    {/* Monitor Closely list — only shown when sessions are also unhealthy */}
+                    {monitorNeedsAttention.length > 0 && (
                       <div className="rounded-lg border border-amber-400/30 overflow-hidden">
                         <div className="bg-amber-500/8 px-3 py-2 flex items-center gap-2">
                           <Eye className="w-3.5 h-3.5 text-amber-500 shrink-0" />
                           <span className="text-[11px] font-bold text-amber-700">
-                            Monitor Closely — {backlinkReport.monitorClosely.length} businesses (partial detection)
+                            Monitor Closely — {monitorNeedsAttention.length} businesses (partial detection + session gap)
                           </span>
                         </div>
                         <div className="divide-y divide-border/30">
-                          {backlinkReport.monitorClosely.map((item) => (
+                          {monitorNeedsAttention.map((item) => (
                             <div key={item.bizName} className="px-3 py-2 flex items-start justify-between gap-3 hover:bg-muted/30">
                               <div className="min-w-0 flex-1">
                                 <p className="text-xs font-semibold truncate" title={item.bizName}>{item.bizName}</p>
@@ -865,7 +877,8 @@ export function HealthMonitorPage() {
                       </div>
                     )}
                   </div>
-                )}
+                  );
+                })()}
 
                 <div className="flex flex-col items-center justify-center gap-3 py-8 text-center">
                   <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
