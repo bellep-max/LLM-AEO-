@@ -7,10 +7,34 @@ import { cn } from "@/lib/utils";
 import {
   Activity, Search, Loader2, AlertCircle, ChevronRight,
   TrendingUp, TrendingDown, Minus, Calendar, RefreshCw, MessageSquare,
+  Link2, AlertTriangle, CheckCircle2, Eye,
 } from "lucide-react";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 type Prediction = "ON_TRACK" | "AT_RISK" | "STABLE" | "TOO_EARLY";
+
+interface BacklinkActionItem {
+  bizName: string;
+  clientName: string;
+  injectedCount: number;
+  foundCount: number;
+  missedPlatforms: string[];
+  foundPlatforms: string[];
+  foundUrls: string[];
+  status: "CRITICAL" | "PARTIAL" | "RESOLVED";
+}
+
+interface BacklinkActionReport {
+  date: string;
+  sourceFile: string | null;
+  totalBusinessesWithInjected: number;
+  totalInjectedSessions: number;
+  totalFoundSessions: number;
+  detectionRate: number;
+  immediateAction: BacklinkActionItem[];
+  monitorClosely: BacklinkActionItem[];
+  resolved: BacklinkActionItem[];
+}
 
 interface PlatformWindow {
   platform: string;
@@ -438,6 +462,8 @@ export function HealthMonitorPage() {
   const [detailError, setDetailError] = useState<string | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
 
+  const [backlinkReport, setBacklinkReport] = useState<BacklinkActionReport | null>(null);
+
   function loadList(date?: string) {
     setLoading(true);
     setListError(null);
@@ -452,7 +478,7 @@ export function HealthMonitorPage() {
       .catch((e) => { setListError(e.message); setLoading(false); });
   }
 
-  // Load available dates on mount, then load the list for the latest date
+  // Load available dates on mount, then load the list + backlink report for the latest date
   useEffect(() => {
     fetch("/api/csv/sessions/dates")
       .then(r => r.json())
@@ -462,15 +488,25 @@ export function HealthMonitorPage() {
         const latest = dates[0] ?? "";
         setReportDate(latest);
         loadList(latest || undefined);
+        if (latest) {
+          fetch(`/api/csv/backlinks/action-items?date=${latest}`)
+            .then(r => r.json())
+            .then(setBacklinkReport)
+            .catch(() => {});
+        }
       })
       .catch(() => loadList());
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // When the date picker changes, reload the list and re-fetch detail if open
+  // When the date picker changes, reload the list, backlinks, and re-fetch detail if open
   useEffect(() => {
     if (!reportDate) return;
     loadList(reportDate);
+    fetch(`/api/csv/backlinks/action-items?date=${reportDate}`)
+      .then(r => r.json())
+      .then(setBacklinkReport)
+      .catch(() => {});
     if (selected) {
       setLoadingDetail(true);
       setDetail(null);
@@ -732,6 +768,117 @@ export function HealthMonitorPage() {
                     </div>
                   </div>
                 )}
+
+                {/* ── Backlink Action Panel ───────────────────────────────── */}
+                {backlinkReport && backlinkReport.totalBusinessesWithInjected > 0 && (() => {
+                  // Build a map of biz -> all-platforms-active from session data
+                  const allActiveSet = new Set(
+                    businesses
+                      .filter(b => b.platformWindows.length > 0 && b.platformWindows.every(p => p.status === "ACTIVE"))
+                      .map(b => b.bizName)
+                  );
+                  // Monitor Closely: only show businesses where at least one platform is NOT active
+                  const monitorNeedsAttention = backlinkReport.monitorClosely.filter(item => !allActiveSet.has(item.bizName));
+                  const monitorSessionsOk    = backlinkReport.monitorClosely.filter(item =>  allActiveSet.has(item.bizName));
+                  const resolvedCount = backlinkReport.resolved.length + monitorSessionsOk.length;
+
+                  return (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+                        <Link2 className="w-3.5 h-3.5" /> Backlink Injection Report — {fmt(backlinkReport.date)}
+                      </p>
+                      <span className="text-[10px] text-muted-foreground">
+                        {backlinkReport.totalFoundSessions}/{backlinkReport.totalInjectedSessions} detected ({(backlinkReport.detectionRate * 100).toFixed(0)}%)
+                        {backlinkReport.sourceFile && <span className="ml-1 opacity-50">· {backlinkReport.sourceFile}</span>}
+                      </span>
+                    </div>
+
+                    {/* KPI row */}
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="rounded-lg border-2 border-red-400/40 bg-red-500/5 p-3 text-center">
+                        <div className="flex items-center justify-center gap-1 mb-1">
+                          <AlertTriangle className="w-3.5 h-3.5 text-red-500" />
+                          <span className="text-[10px] font-bold uppercase text-red-600">Immediate Action</span>
+                        </div>
+                        <p className="text-2xl font-bold text-red-600">{backlinkReport.immediateAction.length}</p>
+                        <p className="text-[10px] text-muted-foreground mt-0.5">0% detection — all injections missed</p>
+                      </div>
+                      <div className="rounded-lg border-2 border-amber-400/40 bg-amber-500/5 p-3 text-center">
+                        <div className="flex items-center justify-center gap-1 mb-1">
+                          <Eye className="w-3.5 h-3.5 text-amber-500" />
+                          <span className="text-[10px] font-bold uppercase text-amber-600">Monitor Closely</span>
+                        </div>
+                        <p className="text-2xl font-bold text-amber-600">{monitorNeedsAttention.length}</p>
+                        <p className="text-[10px] text-muted-foreground mt-0.5">partial detection + session gap</p>
+                      </div>
+                      <div className="rounded-lg border-2 border-emerald-400/40 bg-emerald-500/5 p-3 text-center">
+                        <div className="flex items-center justify-center gap-1 mb-1">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                          <span className="text-[10px] font-bold uppercase text-emerald-600">Resolved</span>
+                        </div>
+                        <p className="text-2xl font-bold text-emerald-600">{resolvedCount}</p>
+                        <p className="text-[10px] text-muted-foreground mt-0.5">all platforms active</p>
+                      </div>
+                    </div>
+
+                    {/* Immediate Action list */}
+                    {backlinkReport.immediateAction.length > 0 && (
+                      <div className="rounded-lg border border-red-400/30 overflow-hidden">
+                        <div className="bg-red-500/8 px-3 py-2 flex items-center gap-2">
+                          <AlertTriangle className="w-3.5 h-3.5 text-red-500 shrink-0" />
+                          <span className="text-[11px] font-bold text-red-700">
+                            Immediate Action Required — {backlinkReport.immediateAction.length} businesses (0% detection)
+                          </span>
+                        </div>
+                        <div className="divide-y divide-border/30 max-h-72 overflow-y-auto">
+                          {backlinkReport.immediateAction.map((item) => (
+                            <div key={item.bizName} className="px-3 py-2 flex items-start justify-between gap-3 hover:bg-muted/30">
+                              <div className="min-w-0 flex-1">
+                                <p className="text-xs font-semibold truncate" title={item.bizName}>{item.bizName}</p>
+                                {item.clientName && <p className="text-[10px] text-muted-foreground">👤 {item.clientName}</p>}
+                              </div>
+                              <div className="shrink-0 text-right">
+                                <p className="text-[10px] font-mono text-red-600 font-semibold">0/{item.injectedCount} found</p>
+                                <p className="text-[9px] text-muted-foreground">{[...new Set(item.missedPlatforms)].join(", ")}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Monitor Closely list — only shown when sessions are also unhealthy */}
+                    {monitorNeedsAttention.length > 0 && (
+                      <div className="rounded-lg border border-amber-400/30 overflow-hidden">
+                        <div className="bg-amber-500/8 px-3 py-2 flex items-center gap-2">
+                          <Eye className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                          <span className="text-[11px] font-bold text-amber-700">
+                            Monitor Closely — {monitorNeedsAttention.length} businesses (partial detection + session gap)
+                          </span>
+                        </div>
+                        <div className="divide-y divide-border/30">
+                          {monitorNeedsAttention.map((item) => (
+                            <div key={item.bizName} className="px-3 py-2 flex items-start justify-between gap-3 hover:bg-muted/30">
+                              <div className="min-w-0 flex-1">
+                                <p className="text-xs font-semibold truncate" title={item.bizName}>{item.bizName}</p>
+                                {item.clientName && <p className="text-[10px] text-muted-foreground">👤 {item.clientName}</p>}
+                                {item.foundUrls.length > 0 && (
+                                  <p className="text-[9px] text-emerald-600 truncate" title={item.foundUrls[0]}>✓ {item.foundUrls[0]}</p>
+                                )}
+                              </div>
+                              <div className="shrink-0 text-right">
+                                <p className="text-[10px] font-mono text-amber-600 font-semibold">{item.foundCount}/{item.injectedCount} found</p>
+                                <p className="text-[9px] text-muted-foreground">missed: {[...new Set(item.missedPlatforms)].join(", ")}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  );
+                })()}
 
                 <div className="flex flex-col items-center justify-center gap-3 py-8 text-center">
                   <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">

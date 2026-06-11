@@ -12,12 +12,31 @@ import {
   getAsOfDate,
   getAllAEOAnalysis,
   getBusinessAEOAnalysis,
+  getBacklinkActionItems,
+  clearCache,
   type Prediction,
   type PerformanceTier,
   type AEOFlagType,
 } from "../lib/csv-data.js";
 
 const router = Router();
+
+/** GET /csv/rankings/dates — distinct ranking run dates in descending order */
+router.get("/csv/rankings/dates", (_req, res) => {
+  try {
+    const all = getAllRankings();
+    const dateSet = new Set<string>();
+    for (const b of all) {
+      for (const kw of b.keywords) {
+        for (const run of kw.runs) if (run.date) dateSet.add(run.date);
+      }
+    }
+    const dates = [...dateSet].sort().reverse();
+    res.json({ dates });
+  } catch (err: unknown) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
 
 /** GET /csv/rankings/businesses — joined with session prediction */
 router.get("/csv/rankings/businesses", (_req, res) => {
@@ -865,6 +884,24 @@ router.get("/csv/sessions/by-date", (req, res) => {
   }
 });
 
+/**
+ * GET /csv/backlinks/action-items?date=YYYY-MM-DD
+ * Returns businesses with backlinks injected on the given date, grouped by detection status.
+ * Reads the daily consolidated CSV file for that date from AEO_DAILY_CSV_DIR.
+ */
+router.get("/csv/backlinks/action-items", (req, res) => {
+  try {
+    const dateParam = (req.query["date"] as string | undefined)?.slice(0, 10);
+    const date = dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam)
+      ? dateParam
+      : getAsOfDate();
+    const report = getBacklinkActionItems(date);
+    res.json(report);
+  } catch (err: unknown) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
 /** GET /csv/sessions/dates — returns list of dates that have session data */
 router.get("/csv/sessions/dates", (_req, res) => {
   try {
@@ -1039,6 +1076,12 @@ ${alertsHtml}
   } catch (err) {
     res.status(500).send(`<p>Error generating report: ${err instanceof Error ? err.message : String(err)}</p>`);
   }
+});
+
+/** POST /csv/cache/clear — clears in-memory caches so next request re-reads CSV files */
+router.post("/csv/cache/clear", (_req, res) => {
+  clearCache();
+  res.json({ ok: true, message: "Cache cleared — next request will re-read all CSV files." });
 });
 
 export default router;
