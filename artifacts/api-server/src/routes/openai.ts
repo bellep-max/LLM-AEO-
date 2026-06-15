@@ -1177,4 +1177,247 @@ router.post("/openai/conversations/:id/messages", async (req, res) => {
   res.end();
 });
 
+// ── Keyword Generator ─────────────────────────────────────────────────────────
+
+function buildKeywordGenPrompt(city: string, population: string, businessType: string, service: string): string {
+  return `You are a local SEO keyword generator. Use the following real data to avoid hallucination.
+
+City: ${city}
+City population (approx.): ${population}
+Business type: ${businessType}
+Core service: ${service}
+
+GROUNDING RULES:
+- Only generate keywords plausible for a city of this size. For population <100k, avoid hyper-local neighborhood terms unless confident.
+- Do NOT invent search volume numbers. Estimate volume as "low/medium/high" relative to city population.
+- If unsure whether a keyword is actually searched, lower the confidence score.
+- Output MUST be valid JSON array only. No text outside the array.
+
+Generate 30 long-tail keywords for a ${businessType} business offering ${service} in ${city}.
+For each keyword provide:
+- "keyword": exact phrase
+- "intent": "informational" | "commercial" | "transactional"
+- "estimated_volume": "low" | "medium" | "high"
+- "confidence": 0.0 to 1.0 (1.0 = very confident real people search this)
+- "neighborhood_specific": true if it uses a neighborhood/landmark name
+
+At least 5 keywords must include neighborhood or landmark names appropriate for ${city} (flag low confidence if unsure).
+
+Output format — ONLY this JSON array, nothing else:
+[
+  {"keyword": "...", "intent": "...", "estimated_volume": "...", "confidence": 0.9, "neighborhood_specific": false},
+  ...
+]`;
+}
+
+function buildDailyReviewPrompt(city: string, csvData: string): string {
+  return `You are an SEO analyst. Below is today's ranking CSV for city: ${city}.
+
+CSV columns: keyword, organic_rank, local_pack_present, screenshot_url
+
+${csvData}
+
+Tasks (use ONLY the data above, do NOT invent):
+1. For each keyword, state if rank improved, declined, or stayed the same compared to yesterday (if yesterday's data not provided, say "baseline only").
+2. Flag any keyword that entered or left the top 10.
+3. List the 3 keywords with the largest rank improvement.
+4. List the 3 keywords with the largest rank drop.
+5. Flag any rank jump >20 positions as "POSSIBLE_HALLUCINATION".
+
+Output ONLY this JSON, nothing else:
+{
+  "city": "${city}",
+  "date": "today",
+  "data_quality": "good | partial | missing",
+  "improvements": [{"keyword": "...", "change": "+N"}],
+  "declines": [{"keyword": "...", "change": "-N"}],
+  "top10_entered": ["keyword"],
+  "top10_exited": ["keyword"],
+  "hallucination_flags": ["keyword: reason"],
+  "summary_text": "3-4 sentence plain English summary",
+  "next_action": "2 keywords to monitor tomorrow"
+}`;
+}
+
+function buildWeeklyAnalysisPrompt(city: string, csvData: string): string {
+  return `You are an SEO analyst reviewing 7 days of ranking data for city: ${city}.
+
+Weekly ranking data (date, keyword, organic_rank, local_pack_present):
+
+${csvData}
+
+Tasks:
+1. Calculate average rank per keyword over 7 days.
+2. Identify 5 keywords with best average rank improvement (week over week).
+3. Identify 5 keywords with worst average rank decline.
+4. Detect patterns: do "near me" keywords perform better on weekends? Answer only if data supports it.
+5. Flag any rank jump >20 positions in one day as "POSSIBLE_HALLUCINATION".
+6. Suggest 3 new keywords to track next week.
+
+Output ONLY this JSON, nothing else:
+{
+  "city": "${city}",
+  "date_range": "...",
+  "data_quality": "good | partial | missing",
+  "top_improvers": [{"keyword": "...", "avg_rank": 0, "change": "+N"}],
+  "top_decliners": [{"keyword": "...", "avg_rank": 0, "change": "-N"}],
+  "patterns": "observed patterns or 'insufficient data'",
+  "hallucination_flags": ["keyword: reason"],
+  "new_keyword_suggestions": ["keyword1", "keyword2", "keyword3"],
+  "summary_text": "3-4 sentence summary"
+}`;
+}
+
+function buildMonthlyAuditPrompt(city: string, rankingsCSV: string, outcomesCSV: string): string {
+  return `You are a strategic AEO consultant. Review 30 days of ranking and outcome data for city: ${city}.
+
+Ranking data (date, keyword, organic_rank, local_pack_present):
+${rankingsCSV}
+
+Business outcomes (keyword, calls, direction_requests):
+${outcomesCSV}
+
+Tasks:
+1. For each keyword calculate: average rank, rank trend, total calls, total direction requests.
+2. ROI score = (calls * 10) + (direction_requests * 5). List top 10 by ROI.
+3. Identify "vanity metrics": keywords in top 10 with zero outcomes.
+4. Identify "hidden gems": keywords with rank >30 but >5 calls.
+5. Recommend 5 keywords to stop tracking (low rank + low outcomes for 30 days).
+6. Flag any keyword with rank fluctuating >20 positions multiple times as "ERRATIC_DATA".
+
+Output ONLY this JSON, nothing else:
+{
+  "city": "${city}",
+  "month": "...",
+  "data_quality": "good | partial | missing",
+  "top_roi_keywords": [{"keyword": "...", "roi_score": 0, "calls": 0, "directions": 0}],
+  "vanity_keywords": ["keyword"],
+  "hidden_gems": [{"keyword": "...", "rank": 0, "calls": 0}],
+  "stop_tracking": ["keyword"],
+  "hallucination_flags": ["keyword: reason"],
+  "strategy_summary": "4-5 sentence strategic summary"
+}`;
+}
+
+function buildCompetitorGapPrompt(keyword: string, city: string): string {
+  return `Act as an SEO expert. Analyze the top 10 ranking pages for keyword "${keyword}" in ${city}.
+
+Identify common content patterns (word count, headings, structure) and list 3 specific content gaps or topics that could be targeted to outperform them.
+
+IMPORTANT: Only reference real, known content patterns. Do not invent ranking pages or domains.
+
+Output ONLY this JSON, nothing else:
+{
+  "keyword": "${keyword}",
+  "city": "${city}",
+  "common_patterns": ["pattern1", "pattern2", "pattern3"],
+  "content_gaps": [
+    {"gap": "...", "rationale": "why this is missing from top results"},
+    {"gap": "...", "rationale": "..."},
+    {"gap": "...", "rationale": "..."}
+  ],
+  "recommended_topics": ["topic1", "topic2", "topic3"],
+  "confidence_note": "Honest note about uncertainty — what you know vs what you're inferring"
+}`;
+}
+
+router.post("/openai/keyword-generator", async (req, res) => {
+  const action = typeof req.body?.action === "string" ? req.body.action : "";
+  const validActions = ["keywords", "daily", "weekly", "monthly", "competitor"];
+  if (!validActions.includes(action)) {
+    res.status(400).json({ error: `action must be one of: ${validActions.join(", ")}` });
+    return;
+  }
+
+  let prompt = "";
+  let eventName = "";
+
+  if (action === "keywords") {
+    const city         = String(req.body?.city ?? "").trim();
+    const population   = String(req.body?.population ?? "unknown").trim();
+    const businessType = String(req.body?.businessType ?? "local business").trim();
+    const service      = String(req.body?.service ?? "").trim();
+    if (!city || !service) { res.status(400).json({ error: "city and service are required" }); return; }
+    prompt = buildKeywordGenPrompt(city, population, businessType, service);
+    eventName = "keyword_generator_keywords";
+  } else if (action === "daily") {
+    const city    = String(req.body?.city ?? "").trim();
+    const csvData = String(req.body?.csvData ?? "").trim();
+    if (!city) { res.status(400).json({ error: "city is required" }); return; }
+    prompt = buildDailyReviewPrompt(city, csvData || "(no CSV data provided — return data_quality: missing)");
+    eventName = "keyword_generator_daily";
+  } else if (action === "weekly") {
+    const city    = String(req.body?.city ?? "").trim();
+    const csvData = String(req.body?.csvData ?? "").trim();
+    if (!city) { res.status(400).json({ error: "city is required" }); return; }
+    prompt = buildWeeklyAnalysisPrompt(city, csvData || "(no CSV data provided — return data_quality: missing)");
+    eventName = "keyword_generator_weekly";
+  } else if (action === "monthly") {
+    const city         = String(req.body?.city ?? "").trim();
+    const rankingsCSV  = String(req.body?.rankingsCSV ?? "").trim();
+    const outcomesCSV  = String(req.body?.outcomesCSV ?? "").trim();
+    if (!city) { res.status(400).json({ error: "city is required" }); return; }
+    prompt = buildMonthlyAuditPrompt(
+      city,
+      rankingsCSV || "(no rankings CSV provided)",
+      outcomesCSV || "(no outcomes CSV provided)"
+    );
+    eventName = "keyword_generator_monthly";
+  } else if (action === "competitor") {
+    const keyword = String(req.body?.keyword ?? "").trim();
+    const city    = String(req.body?.city ?? "").trim();
+    if (!keyword || !city) { res.status(400).json({ error: "keyword and city are required" }); return; }
+    prompt = buildCompetitorGapPrompt(keyword, city);
+    eventName = "keyword_generator_competitor";
+  }
+
+  try {
+    const startTime = Date.now();
+    const completion = await createCompletion({
+      model: CHAT_MODEL,
+      max_tokens: 4000,
+      temperature: 0.3,
+      messages: [
+        { role: "system", content: "You are an SEO analyst. Output ONLY valid JSON — no markdown, no code fences, no text outside the JSON." },
+        { role: "user",   content: prompt },
+      ],
+    });
+
+    let data: unknown;
+    try {
+      data = extractJson(completion.choices[0]?.message?.content ?? "");
+    } catch (parseErr) {
+      res.status(502).json({ error: `LLM returned non-JSON: ${(parseErr as Error).message}` });
+      return;
+    }
+
+    const traceUrl = await recordTrace({
+      name: eventName,
+      input: req.body,
+      output: data,
+      model: completion._model_used ?? CHAT_MODEL,
+      messages: [
+        { role: "system", content: "You are an SEO analyst. Output ONLY valid JSON." },
+        { role: "user",   content: prompt },
+      ],
+      responseContent: completion.choices[0]?.message?.content ?? "",
+      usage: completion.usage,
+      startTime,
+    });
+
+    await db.insert(backendLogs).values({
+      event: eventName,
+      model: CHAT_MODEL,
+      tokensUsed: completion.usage?.total_tokens ?? null,
+      responseTimeMs: Date.now() - startTime,
+      status: "success",
+      details: traceUrl,
+    });
+
+    res.json({ data, tokens_used: completion.usage?.total_tokens ?? 0, trace_url: traceUrl });
+  } catch (err) {
+    res.status(502).json({ error: err instanceof Error ? err.message : "Keyword generator failed" });
+  }
+});
+
 export default router;
