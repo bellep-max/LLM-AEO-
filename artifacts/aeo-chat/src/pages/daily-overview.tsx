@@ -425,6 +425,180 @@ function RankBar({ rs, comparableCount }: { rs: DailyOverview["rankingsSummary"]
   );
 }
 
+// ── Rank Visibility Panel ──────────────────────────────────────────────────────
+const PLAT_DOT: Record<string, string> = {
+  ChatGPT: "bg-emerald-500", Gemini: "bg-blue-500", Perplexity: "bg-violet-500",
+};
+const PLAT_TEXT: Record<string, string> = {
+  ChatGPT: "text-emerald-700", Gemini: "text-blue-700", Perplexity: "text-violet-700",
+};
+const PLAT_BG: Record<string, string> = {
+  ChatGPT: "bg-emerald-500/10", Gemini: "bg-blue-500/10", Perplexity: "bg-violet-500/10",
+};
+
+function RankVisibilityPanel({ businesses, rankAlerts }: {
+  businesses: BizRow[];
+  rankAlerts: RankAlert[];
+}) {
+  const PLATFORMS = ["ChatGPT", "Gemini", "Perplexity"];
+  const tiers = [
+    { label: "Top 1",  max: 1,  color: "text-emerald-700", bg: "bg-emerald-500/10" },
+    { label: "Top 3",  max: 3,  color: "text-teal-700",    bg: "bg-teal-500/10" },
+    { label: "Top 10", max: 10, color: "text-blue-700",    bg: "bg-blue-500/10" },
+    { label: "Top 25", max: 25, color: "text-violet-700",  bg: "bg-violet-500/10" },
+  ];
+
+  // Businesses with ranking data only
+  const ranked = businesses.filter(b => b.latestRankDate);
+  const n = ranked.length;
+
+  // Visibility gains: REAPPEARED label
+  const reappeared = ranked.filter(b => b.rankLabel === "REAPPEARED");
+  // Lost visibility: NOT_FOUND_CRITICAL label
+  const lostVis    = ranked.filter(b => b.rankLabel === "NOT_FOUND_CRITICAL");
+  // Major jumps: rank alert with prevRank null→found, OR large position improvement
+  const majorJumps = rankAlerts.filter(a =>
+    (a.prevRank == null && a.currentRank != null) ||
+    (a.prevRank != null && a.currentRank != null && a.prevRank > 25 && a.currentRank <= 25)
+  );
+
+  if (n === 0) return null;
+
+  return (
+    <div className="space-y-3">
+      {/* Position Distribution */}
+      <div className="rounded-xl border border-border p-4 space-y-3">
+        <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+          📊 Ranking Visibility — Position Distribution
+          <span className="font-normal normal-case ml-1 text-muted-foreground/70">({n} businesses with rankings)</span>
+        </p>
+        <table className="w-full text-[11px] border-collapse">
+          <thead>
+            <tr>
+              <th className="text-left py-1 pr-3 text-muted-foreground font-medium w-20">Tier</th>
+              {PLATFORMS.map((p) => (
+                <th key={p} className="text-center py-1 px-2 font-semibold">
+                  <div className="flex items-center justify-center gap-1">
+                    <span className={cn("w-2 h-2 rounded-full shrink-0", PLAT_DOT[p])} />
+                    <span className={PLAT_TEXT[p]}>{p}</span>
+                  </div>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {[
+              ...tiers.map(({ label, max, color, bg }) => ({
+                label, bg, color,
+                cells: PLATFORMS.map((p) => {
+                  const cnt = ranked.filter(b => (b.bestRanks?.[p] ?? 999) <= max).length;
+                  const pct = n > 0 ? Math.round((cnt / n) * 100) : 0;
+                  return { cnt, pct };
+                }),
+              })),
+              {
+                label: "Not Found",
+                bg: "bg-slate-500/10",
+                color: "text-slate-600",
+                cells: PLATFORMS.map((p) => {
+                  const cnt = ranked.filter(b => (b.bestRanks?.[p] ?? null) == null).length;
+                  const pct = n > 0 ? Math.round((cnt / n) * 100) : 0;
+                  return { cnt, pct };
+                }),
+              },
+            ].map(({ label, bg, color, cells }) => (
+              <tr key={label} className={cn("rounded", bg)}>
+                <td className={cn("py-1 pr-3 font-medium rounded-l pl-2", color)}>{label}</td>
+                {cells.map(({ cnt, pct }, i) => (
+                  <td key={i} className={cn("text-center py-1 px-2 font-mono tabular-nums last:rounded-r", color)}>
+                    {cnt} <span className="text-[10px] font-normal text-muted-foreground">({pct}%)</span>
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Visibility Gains & Lost Visibility */}
+      {(reappeared.length > 0 || lostVis.length > 0 || majorJumps.length > 0) && (
+        <div className="grid grid-cols-2 gap-3">
+          {/* Gains */}
+          <div className="rounded-xl border border-emerald-300/50 bg-emerald-50/60 dark:bg-emerald-950/20 p-4 space-y-2">
+            <p className="text-[11px] font-bold text-emerald-800">
+              ✨ Visibility Gains
+              <span className="ml-1.5 text-[10px] font-normal text-emerald-600">
+                {reappeared.length + majorJumps.length} total
+              </span>
+            </p>
+            {reappeared.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-[9px] font-semibold uppercase tracking-wide text-emerald-700">Re-appeared — was gone, now visible</p>
+                {reappeared.map((b, i) => (
+                  <div key={i} className="rounded border border-emerald-200 bg-white/70 px-2 py-1.5 text-[10px] flex items-center gap-2">
+                    <span className="flex-1 font-medium truncate">{b.bizName}</span>
+                    {b.latestRankDate && <span className="text-emerald-600 shrink-0">{fmt(b.latestRankDate)}</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+            {majorJumps.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-[9px] font-semibold uppercase tracking-wide text-teal-700">Major Jumps — outside Top 25 → inside</p>
+                {[...new Map(majorJumps.map(a => [a.bizName, a])).values()].map((a, i) => (
+                  <div key={i} className="rounded border border-teal-200 bg-white/70 px-2 py-1.5 text-[10px] flex items-center gap-2">
+                    <span className="flex-1 font-medium truncate">{a.bizName}</span>
+                    <span className="text-teal-700 shrink-0 text-[9px]">
+                      {a.prevRank == null ? "New" : `#${a.prevRank}`} → #{a.currentRank}
+                      <span className="text-muted-foreground ml-1">({a.platform})</span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {reappeared.length === 0 && majorJumps.length === 0 && (
+              <p className="text-[10px] text-muted-foreground italic">No visibility gains this cycle</p>
+            )}
+          </div>
+
+          {/* Lost Visibility */}
+          <div className={cn(
+            "rounded-xl border p-4 space-y-2",
+            lostVis.length > 0
+              ? "border-blue-300/50 bg-blue-50/60 dark:bg-blue-950/20"
+              : "border-border bg-muted/20"
+          )}>
+            <p className={cn("text-[11px] font-bold", lostVis.length > 0 ? "text-blue-800" : "text-foreground")}>
+              🚫 Lost Visibility
+              <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">{lostVis.length} businesses</span>
+            </p>
+            {lostVis.length === 0 ? (
+              <p className="text-[10px] text-emerald-600 font-medium">All businesses remain visible ✅</p>
+            ) : (
+              <div className="space-y-1">
+                <p className="text-[9px] font-semibold uppercase tracking-wide text-blue-700">Were ranked — now completely absent</p>
+                {lostVis.map((b, i) => {
+                  const alert = rankAlerts.find(a => a.bizName === b.bizName && a.label === "NOT_FOUND_CRITICAL");
+                  return (
+                    <div key={i} className="rounded border border-blue-200 bg-white/70 px-2 py-1.5 text-[10px] space-y-0.5">
+                      <p className="font-medium text-foreground truncate">{b.bizName}</p>
+                      {alert && (
+                        <p className="text-blue-700 text-[9px]">
+                          {alert.platform} · was #{alert.prevRank ?? "?"} · kw: {alert.keyword}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── At Risk card ───────────────────────────────────────────────────────────────
 function AtRiskCard({ biz }: { biz: AtRiskBiz }) {
   return (
@@ -1727,37 +1901,13 @@ export function DailyOverviewPage() {
   const [excludeFirstRun, setExcludeFirstRun] = useState(true);
   const [backlinkReport, setBacklinkReport] = useState<BacklinkActionReport | null>(null);
 
-  const load = useCallback(() => {
+  const loadForDate = useCallback((date: string) => {
     setLoading(true);
     setError(null);
-    fetch("/api/csv/daily/overview")
-      .then((r) => r.json())
-      .then((d) => { setData(d); setLoading(false); })
-      .catch((e) => { setError(e.message); setLoading(false); });
-  }, []);
-
-  useEffect(() => {
-    fetch("/api/csv/sessions/dates")
-      .then(r => r.json())
-      .then(d => {
-        const dates: string[] = d.dates ?? [];
-        setAvailableDates(dates);
-        if (dates.length > 0 && !reportDate) setReportDate(dates[0]);
-      })
-      .catch(() => {});
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // When a date is selected, re-fetch the overview computed for that date so that
-  // health tiles (AT Risk / Stable / On Track / Too Early) and all predictions
-  // reflect the 7-day window ending on the chosen date, not the latest date.
-  useEffect(() => {
-    if (!reportDate) return;
-    setLoading(true);
     Promise.all([
-      fetch(`/api/csv/daily/overview?date=${reportDate}`).then(r => r.json()),
-      fetch(`/api/csv/sessions/by-date?date=${reportDate}`).then(r => r.json()),
-      fetch(`/api/csv/backlinks/action-items?date=${reportDate}`).then(r => r.json()).catch(() => null),
+      fetch(`/api/csv/daily/overview?date=${date}`).then(r => r.json()),
+      fetch(`/api/csv/sessions/by-date?date=${date}`).then(r => r.json()),
+      fetch(`/api/csv/backlinks/action-items?date=${date}`).then(r => r.json()).catch(() => null),
     ])
       .then(([overview, byDate, backlinks]) => {
         setData(overview);
@@ -1766,9 +1916,41 @@ export function DailyOverviewPage() {
         setLoading(false);
       })
       .catch((e) => { setError(e.message); setLoading(false); });
-  }, [reportDate]);
+  }, []);
 
-  useEffect(() => { load(); }, [load]);
+  const load = useCallback(() => {
+    if (reportDate) { loadForDate(reportDate); return; }
+    setLoading(true);
+    setError(null);
+    fetch("/api/csv/daily/overview")
+      .then((r) => r.json())
+      .then((d) => { setData(d); setLoading(false); })
+      .catch((e) => { setError(e.message); setLoading(false); });
+  }, [reportDate, loadForDate]);
+
+  // Single mount effect: fetch dates then load data for the most-recent date.
+  // No secondary effects that re-trigger on state changes — avoids double-load flicker.
+  useEffect(() => {
+    fetch("/api/csv/sessions/dates")
+      .then(r => r.json())
+      .then(d => {
+        const dates: string[] = d.dates ?? [];
+        setAvailableDates(dates);
+        const first = dates[0] ?? "";
+        if (first) { setReportDate(first); loadForDate(first); }
+        else {
+          fetch("/api/csv/daily/overview").then(r => r.json())
+            .then(data => { setData(data); setLoading(false); })
+            .catch(e => { setError(e.message); setLoading(false); });
+        }
+      })
+      .catch(() => {
+        fetch("/api/csv/daily/overview").then(r => r.json())
+          .then(data => { setData(data); setLoading(false); })
+          .catch(e => { setError(e.message); setLoading(false); });
+      });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (loading) {
     return (
@@ -1810,9 +1992,7 @@ export function DailyOverviewPage() {
   });
 
   return (
-    <div className="flex h-full overflow-hidden">
-      {/* ── Main content ──────────────────────────────────────────── */}
-      <div className="flex-1 min-w-0 overflow-y-auto">
+    <div className="h-full overflow-y-auto">
       <div className="p-6 space-y-5 max-w-5xl mx-auto">
 
         {/* ── Header ──────────────────────────────────────────────── */}
@@ -1839,7 +2019,7 @@ export function DailyOverviewPage() {
               <div className="flex items-center gap-1.5">
                 <select
                   value={reportDate}
-                  onChange={e => { setReportDate(e.target.value); setActiveTab("summary"); }}
+                  onChange={e => { const d = e.target.value; setReportDate(d); setActiveTab("summary"); loadForDate(d); }}
                   className="h-8 text-xs rounded-md border border-border bg-background px-2 py-0 focus:outline-none focus:ring-1 focus:ring-primary"
                 >
                   {availableDates.map(d => (
@@ -1888,6 +2068,9 @@ export function DailyOverviewPage() {
         {/* ── Rankings distribution bar ────────────────────────────── */}
         <RankBar rs={data.rankingsSummary} comparableCount={data.totalWithComparableRankings ?? data.totalWithRankings} />
 
+        {/* ── Rank Visibility Panel ────────────────────────────────── */}
+        <RankVisibilityPanel businesses={data.businesses} rankAlerts={data.rankAlerts} />
+
         {/* ── Search + filters ────────────────────────────────────── */}
         <div className="space-y-2">
           <div className="relative">
@@ -1923,13 +2106,13 @@ export function DailyOverviewPage() {
 
         {/* ── Tabs ────────────────────────────────────────────────── */}
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="h-9 flex-wrap">
+          <TabsList className="h-9 w-full justify-start">
             <TabsTrigger value="summary" className="text-xs h-8 gap-1.5">
               <BarChart2 className="w-3 h-3" />Summary
             </TabsTrigger>
             <TabsTrigger value="missed" className="text-xs h-8 gap-1.5">
-              <span className="w-3 h-3 text-[11px]">⚫</span>
-              Missed Today
+              <span className="text-[11px]">⚫</span>
+              Missed
               {(() => {
                 const mc = data.businesses.filter(b => b.sessionsToday === 0 && b.daysActive >= 7).length;
                 return mc > 0 ? <span className="text-red-500 font-bold">({mc})</span> : null;
@@ -1937,7 +2120,7 @@ export function DailyOverviewPage() {
             </TabsTrigger>
             <TabsTrigger value="actions" className="text-xs h-8 gap-1.5">
               <ClipboardList className="w-3 h-3" />
-              Action Items
+              Actions
               {(data.atRiskBusinesses.length + data.rankAlerts.filter(a => a.label === "SUDDEN_DROP" || a.label === "NOT_FOUND_CRITICAL").length) > 0 && (
                 <span className="text-orange-500 font-bold">
                   ({data.atRiskBusinesses.length + data.rankAlerts.filter(a => a.label === "SUDDEN_DROP" || a.label === "NOT_FOUND_CRITICAL").length})
@@ -1950,14 +2133,14 @@ export function DailyOverviewPage() {
             </TabsTrigger>
             <TabsTrigger value="businesses" className="text-xs h-8 gap-1.5">
               <BarChart2 className="w-3 h-3" />
-              All Businesses ({data.totalBusinesses})
+              Businesses ({data.totalBusinesses})
             </TabsTrigger>
             <TabsTrigger value="reports" className="text-xs h-8 gap-1.5">
-              <CheckCircle2 className="w-3 h-3" />Per-Business Reports
+              <CheckCircle2 className="w-3 h-3" />Reports
             </TabsTrigger>
             <TabsTrigger value="backlinks" className="text-xs h-8 gap-1.5">
               <Link2 className="w-3 h-3" />
-              Backlink Actions
+              Backlinks
               {backlinkReport && (() => {
                 const allActiveSet = new Set(data.businesses.filter(b => b.platformWindows.length > 0 && b.platformWindows.every((p: PlatformWindow) => p.status === "ACTIVE")).map(b => b.bizName));
                 const actionCount = backlinkReport.immediateAction.length + backlinkReport.monitorClosely.filter(i => !allActiveSet.has(i.bizName)).length;
@@ -2270,17 +2453,13 @@ export function DailyOverviewPage() {
           </TabsContent>
 
           {/* AI Chat tab — forceMount keeps the panel alive so fetches survive tab switches */}
-          <TabsContent value="chat" forceMount className="mt-2 data-[state=inactive]:hidden">
+          <TabsContent value="chat" forceMount className={cn("mt-2", activeTab !== "chat" && "hidden")}>
             <div className="rounded-xl border border-border overflow-hidden" style={{ height: "calc(100vh - 260px)", minHeight: "520px" }}>
               <AeoChatPanel businesses={filteredBiz} />
             </div>
           </TabsContent>
         </Tabs>
       </div>
-      </div>
-
-      {/* ── Improved businesses sidebar ────────────────────────────── */}
-      <ImprovedSidebar businesses={data.businesses} excludeFirstRun={excludeFirstRun} />
     </div>
   );
 }

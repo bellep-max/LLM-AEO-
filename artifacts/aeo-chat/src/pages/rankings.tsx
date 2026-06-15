@@ -85,6 +85,7 @@ interface BusinessSummary {
   platformLabels: Record<string, RankLabel>;
   firstRunDate: string; latestRunDate: string; totalRuns: number;
   bestRanks: Record<string, number | null>;
+  prevBestRanks: Record<string, number | null>;
   session: SessionInfo | null;
 }
 
@@ -1069,6 +1070,69 @@ function OverviewPanel({
         </div>
       </div>
 
+      {/* ── Position Distribution per Platform ──────────────────────────── */}
+      {total > 0 && (() => {
+        const tiers = [
+          { label: "Top 1",  max: 1,  color: "text-emerald-700", bg: "bg-emerald-500/10" },
+          { label: "Top 3",  max: 3,  color: "text-teal-700",    bg: "bg-teal-500/10" },
+          { label: "Top 10", max: 10, color: "text-blue-700",    bg: "bg-blue-500/10" },
+          { label: "Top 25", max: 25, color: "text-violet-700",  bg: "bg-violet-500/10" },
+        ];
+        const platDot:  Record<string, string> = { ChatGPT: "bg-emerald-500",   Gemini: "bg-blue-500",   Perplexity: "bg-violet-500" };
+        const platText: Record<string, string> = { ChatGPT: "text-emerald-700", Gemini: "text-blue-700", Perplexity: "text-violet-700" };
+        const rows = [
+          ...tiers.map(({ label, max, color, bg }) => ({
+            label, color, bg,
+            cells: PLATFORMS.map(p => {
+              const cnt = businesses.filter(b => (b.bestRanks[p] ?? 999) <= max).length;
+              return { cnt, pct: Math.round((cnt / total) * 100) };
+            }),
+          })),
+          {
+            label: "Not Found", color: "text-slate-600", bg: "bg-slate-500/10",
+            cells: PLATFORMS.map(p => {
+              const cnt = businesses.filter(b => b.bestRanks[p] == null).length;
+              return { cnt, pct: Math.round((cnt / total) * 100) };
+            }),
+          },
+        ];
+        return (
+          <div className="rounded-xl border border-border p-4 space-y-3">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+              📊 Ranking Visibility — Position Distribution
+              <span className="font-normal normal-case ml-1 text-muted-foreground/70">({total} businesses)</span>
+            </p>
+            <table className="w-full text-[11px] border-collapse">
+              <thead>
+                <tr>
+                  <th className="text-left py-1 pr-3 text-muted-foreground font-medium w-20">Tier</th>
+                  {PLATFORMS.map(p => (
+                    <th key={p} className="text-center py-1 px-2 font-semibold">
+                      <div className="flex items-center justify-center gap-1">
+                        <span className={cn("w-2 h-2 rounded-full shrink-0", platDot[p])} />
+                        <span className={platText[p]}>{p}</span>
+                      </div>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(({ label, color, bg, cells }) => (
+                  <tr key={label} className={bg}>
+                    <td className={cn("py-1 pr-3 font-medium pl-2", color)}>{label}</td>
+                    {cells.map(({ cnt, pct }, i) => (
+                      <td key={i} className={cn("text-center py-1 px-2 font-mono tabular-nums", color)}>
+                        {cnt} <span className="text-[10px] font-normal text-muted-foreground">({pct}%)</span>
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      })()}
+
       {/* ── AEO Performance Tier summary ──────────────────────────────────── */}
       {aeoLoading ? (
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -1198,6 +1262,104 @@ function OverviewPanel({
           );
         })}
       </div>
+
+      {/* ── Visibility Gains & Drops ─────────────────────────────────────── */}
+      {(() => {
+        // REAPPEARED = was not found, now visible on any platform
+        const reappearedBiz = businesses.filter(b =>
+          PLATFORMS.some(p => b.platformLabels[p] === "REAPPEARED")
+        );
+        // NOT_FOUND_CRITICAL = was visible, now gone on any platform
+        const lostVisibilityBiz = businesses.filter(b =>
+          PLATFORMS.some(p => b.platformLabels[p] === "NOT_FOUND_CRITICAL")
+        );
+        // Major rank jumps: prevBestRank > 25 and now bestRank <= 25 (big position improvement)
+        const majorJumpBiz = businesses.filter(b =>
+          PLATFORMS.some(p => {
+            const prev = b.prevBestRanks?.[p];
+            const curr = b.bestRanks[p];
+            return prev != null && curr != null && prev > 25 && curr <= 25;
+          })
+        );
+
+        if (reappearedBiz.length === 0 && lostVisibilityBiz.length === 0 && majorJumpBiz.length === 0) return null;
+
+        return (
+          <div className="grid grid-cols-2 gap-3">
+            {/* Visibility Gains */}
+            <Card className="border-emerald-500/25 bg-emerald-500/5">
+              <CardHeader className="pb-2 pt-3">
+                <CardTitle className="text-xs flex items-center gap-2">
+                  ✨ Visibility Gains
+                  <span className="ml-auto text-[10px] font-normal text-muted-foreground">{reappearedBiz.length + majorJumpBiz.length} businesses</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-0 space-y-2">
+                {reappearedBiz.length > 0 && (
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-semibold text-emerald-700">Re-appeared (was gone, now visible)</p>
+                    {reappearedBiz.map((b, i) => {
+                      const plats = PLATFORMS.filter(p => b.platformLabels[p] === "REAPPEARED");
+                      return (
+                        <div key={i} className="flex items-center gap-2 rounded border border-emerald-300/50 bg-white/60 px-2 py-1.5 text-[10px]">
+                          <span className="flex-1 font-medium text-foreground truncate">{b.bizName}</span>
+                          <span className="text-emerald-600 shrink-0">{plats.join(", ")}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                {majorJumpBiz.length > 0 && (
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-semibold text-teal-700">Major Jump (outside Top 25 → inside Top 25)</p>
+                    {majorJumpBiz.map((b, i) => {
+                      const details = PLATFORMS
+                        .filter(p => { const prev = b.prevBestRanks?.[p]; const curr = b.bestRanks[p]; return prev != null && curr != null && prev > 25 && curr <= 25; })
+                        .map(p => `${p}: #${b.prevBestRanks[p]}→#${b.bestRanks[p]}`);
+                      return (
+                        <div key={i} className="flex items-center gap-2 rounded border border-teal-300/50 bg-white/60 px-2 py-1.5 text-[10px]">
+                          <span className="flex-1 font-medium text-foreground truncate">{b.bizName}</span>
+                          <span className="text-teal-600 shrink-0 text-[9px]">{details.join(" · ")}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                {reappearedBiz.length === 0 && majorJumpBiz.length === 0 && (
+                  <p className="text-[10px] text-muted-foreground italic">No visibility gains this run</p>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Lost Visibility */}
+            <Card className="border-blue-600/25 bg-blue-500/5">
+              <CardHeader className="pb-2 pt-3">
+                <CardTitle className="text-xs flex items-center gap-2">
+                  🚫 Lost Visibility
+                  <span className="ml-auto text-[10px] font-normal text-muted-foreground">{lostVisibilityBiz.length} businesses</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-0 space-y-1">
+                <p className="text-[10px] text-muted-foreground mb-1.5">
+                  Were ranked, now completely absent from AI responses on at least one platform.
+                </p>
+                {lostVisibilityBiz.length === 0 ? (
+                  <p className="text-[10px] text-emerald-600 italic">No businesses lost visibility ✅</p>
+                ) : lostVisibilityBiz.map((b, i) => {
+                  const plats = PLATFORMS.filter(p => b.platformLabels[p] === "NOT_FOUND_CRITICAL");
+                  const prevRanks = plats.map(p => b.prevBestRanks?.[p] ? `${p}: was #${b.prevBestRanks[p]}` : p).join(" · ");
+                  return (
+                    <div key={i} className="rounded border border-blue-300/50 bg-white/60 px-2 py-1.5 text-[10px] space-y-0.5">
+                      <p className="font-medium text-foreground truncate">{b.bizName}</p>
+                      <p className="text-blue-700 text-[9px]">{prevRanks}</p>
+                    </div>
+                  );
+                })}
+              </CardContent>
+            </Card>
+          </div>
+        );
+      })()}
 
       {/* Why analysis — side by side */}
       <div className="grid grid-cols-2 gap-3">

@@ -55,17 +55,21 @@ router.get("/csv/rankings/businesses", (_req, res) => {
 
     const data = getAllRankings().map((b) => {
       const sess = sessMap.get(b.bizName);
-      // Best current rank per platform
+      // Best current and previous rank per platform
       const bestRanks: Record<string, number | null> = {};
+      const prevBestRanks: Record<string, number | null> = {};
       for (const p of ["ChatGPT", "Gemini", "Perplexity"]) {
-        const kws = b.keywords.filter((k) => k.platform === p && k.currentRun?.position != null);
-        bestRanks[p] = kws.length ? Math.min(...kws.map((k) => k.currentRun!.position!)) : null;
+        const kws = b.keywords.filter((k) => k.platform === p);
+        const currKws = kws.filter((k) => k.currentRun?.position != null);
+        const prevKws = kws.filter((k) => k.prevRun?.position != null);
+        bestRanks[p]     = currKws.length ? Math.min(...currKws.map((k) => k.currentRun!.position!)) : null;
+        prevBestRanks[p] = prevKws.length ? Math.min(...prevKws.map((k) => k.prevRun!.position!))    : null;
       }
       return {
         bizName: b.bizName, overallLabel: b.overallLabel,
         platformLabels: b.platformLabels, firstRunDate: b.firstRunDate,
         latestRunDate: b.latestRunDate, totalRuns: b.totalRuns,
-        bestRanks,
+        bestRanks, prevBestRanks,
         session: sess ?? null,
       };
     });
