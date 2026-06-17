@@ -12,6 +12,7 @@ import { RankingsPage } from "@/pages/rankings";
 import { HealthMonitorPage } from "@/pages/health-monitor";
 import { DailyOverviewPage } from "@/pages/daily-overview";
 import { ArchivePage } from "@/pages/archive";
+import { KeywordGeneratorPage } from "@/pages/keyword-generator";
 import { HistoryProvider, useHistory } from "@/contexts/history-context";
 import { onChatCompletion } from "@/hooks/use-global-chat";
 
@@ -48,6 +49,7 @@ function Router() {
         <Route path="/health-monitor" component={HealthMonitorPage} />
         <Route path="/daily-overview" component={DailyOverviewPage} />
         <Route path="/archive" component={ArchivePage} />
+        <Route path="/keyword-generator" component={KeywordGeneratorPage} />
         <Route component={NotFound} />
       </Switch>
     </Layout>
