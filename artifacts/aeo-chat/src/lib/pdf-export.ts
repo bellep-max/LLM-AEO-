@@ -280,3 +280,148 @@ export function buildChatPdf(messages: any[], conversationTitle: string): string
         </div>`).join("")}
     </div>`;
 }
+
+// ── Per-item PDF builders ─────────────────────────────────────────────────────
+
+export function buildSingleAuditKeyword(kw: any, businessName: string): string {
+  const ease = 6 - (kw.effort ?? 0);
+  const priorityColor = kw.priority === "high" ? "#15803d" : kw.priority === "medium" ? "#1d4ed8" : "#6b7280";
+  return `
+    <div class="section">
+      <div class="section-title">Business</div>
+      <div class="card"><span class="kv-label">Name:</span> <strong>${businessName}</strong></div>
+    </div>
+    <div class="section">
+      <div class="section-title">Keyword ICE Score</div>
+      <div class="card">
+        <div style="font-size:20px;font-weight:700;margin-bottom:12px">${kw.keyword}</div>
+        <div class="kv-row"><span class="kv-label">Impact</span><span class="kv-value">${kw.impact} / 5</span></div>
+        <div class="kv-row"><span class="kv-label">Confidence</span><span class="kv-value">${kw.confidence} / 5</span></div>
+        <div class="kv-row"><span class="kv-label">Effort</span><span class="kv-value">${kw.effort} / 5</span></div>
+        <div class="kv-row"><span class="kv-label">Ease (6 − Effort)</span><span class="kv-value">${ease}</span></div>
+        <div class="kv-row" style="border-top:2px solid #e5e7eb;margin-top:8px;padding-top:8px">
+          <span class="kv-label">Weighted ICE</span>
+          <span class="kv-value" style="font-size:18px">${kw.weighted_ice?.toFixed(2) ?? "—"}</span>
+        </div>
+        <div class="kv-row">
+          <span class="kv-label">Priority</span>
+          <span class="kv-value" style="color:${priorityColor}">${kw.priority?.toUpperCase()}</span>
+        </div>
+      </div>
+    </div>`;
+}
+
+export function buildSingleAuditPrompt(prompt: any, searches: any, businessName: string): string {
+  return `
+    <div class="section">
+      <div class="section-title">Business</div>
+      <div class="card"><span class="kv-label">Name:</span> <strong>${businessName}</strong></div>
+    </div>
+    <div class="section">
+      <div class="section-title">Example AEO Prompt</div>
+      <div class="mono">${(prompt?.text ?? "—").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</div>
+      <div class="card" style="margin-top:12px">
+        <div class="kv-row"><span class="kv-label">PQS Score</span><span class="kv-value">${prompt?.pqs_score?.toFixed(2) ?? "—"}</span></div>
+        <div class="kv-row"><span class="kv-label">PC Average</span><span class="kv-value">${prompt?.pc_avg?.toFixed(2) ?? "—"}</span></div>
+        <div class="kv-row"><span class="kv-label">RC Average</span><span class="kv-value">${prompt?.rc_avg?.toFixed(2) ?? "—"}</span></div>
+        <div class="kv-row"><span class="kv-label">Meets Threshold</span><span class="kv-value">${prompt?.meets_threshold ? "✓ Yes" : "✗ No"}</span></div>
+      </div>
+    </div>
+    ${searches ? `
+    <div class="section">
+      <div class="section-title">Required Search Volume</div>
+      <div class="card">
+        <div class="kv-row"><span class="kv-label">Total Prompts</span><span class="kv-value">${searches.total_prompts ?? "—"}</span></div>
+        <div class="kv-row"><span class="kv-label">Weekly Prompts</span><span class="kv-value">${searches.weekly_prompts ?? "—"}</span></div>
+        ${searches.formula_used ? `<div style="margin-top:8px;font-size:10px;font-family:monospace;color:#6b7280">${searches.formula_used}</div>` : ""}
+      </div>
+    </div>` : ""}`;
+}
+
+export function buildSingleBacklinkOpp(opp: any, index: number, targetKeyword: string): string {
+  return `
+    <div class="section">
+      <div class="section-title">Target Keyword</div>
+      <div class="card"><strong>${targetKeyword}</strong></div>
+    </div>
+    <div class="section">
+      <div class="section-title">Backlink Opportunity #${index + 1}</div>
+      <div class="card">
+        <div style="font-size:18px;font-weight:700;margin-bottom:10px">${opp.platform_name}</div>
+        <div class="kv-row"><span class="kv-label">URL</span><span class="kv-value" style="font-size:11px">${opp.platform_url || "—"}</span></div>
+        <div class="kv-row"><span class="kv-label">Type</span><span class="kv-value">${opp.type}</span></div>
+        <div class="kv-row"><span class="kv-label">Relevance</span><span class="kv-value">${opp.relevance}</span></div>
+        <div class="kv-row"><span class="kv-label">Domain Authority (est.)</span><span class="kv-value">${opp.domain_authority_estimate}</span></div>
+        <div class="kv-row"><span class="kv-label">Link Type</span><span class="kv-value">${opp.do_follow ? "DoFollow" : "NoFollow"}</span></div>
+        <div class="kv-row"><span class="kv-label">Effort</span><span class="kv-value">${opp.effort}</span></div>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-title">Why This Works</div>
+      <div class="highlight">${opp.why_this_works || "—"}</div>
+    </div>
+    <div class="section">
+      <div class="section-title">Step-by-Step Instructions</div>
+      <div class="card" style="white-space:pre-wrap;font-size:12px;line-height:1.7">${(opp.instructions || "—").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</div>
+    </div>
+    ${opp.competitor_insight ? `
+    <div class="section">
+      <div class="section-title">Competitor Insight</div>
+      <div class="card-sub" style="font-size:12px">${opp.competitor_insight}</div>
+    </div>` : ""}`;
+}
+
+export function buildSingleLinkProspect(p: any, targetKeyword: string): string {
+  const cig = p.content_insertion_guide;
+  return `
+    <div class="section">
+      <div class="section-title">Target Keyword</div>
+      <div class="card"><strong>${targetKeyword}</strong></div>
+    </div>
+    <div class="section">
+      <div class="section-title">Link Prospect #${p.rank}</div>
+      <div class="card">
+        <div style="font-size:16px;font-weight:700;margin-bottom:10px">${p.website_url}</div>
+        <div class="kv-row"><span class="kv-label">Injection Type</span><span class="kv-value">${p.injection_type}</span></div>
+        <div class="kv-row"><span class="kv-label">Domain Authority (est.)</span><span class="kv-value">${p.domain_authority_estimate}</span></div>
+        <div class="kv-row"><span class="kv-label">Relevance Score</span><span class="kv-value">${p.relevance_score?.toFixed(1) ?? "—"}</span></div>
+        <div class="kv-row"><span class="kv-label">Link Type</span><span class="kv-value">${p.do_follow ? "DoFollow" : "NoFollow"}</span></div>
+        <div class="kv-row"><span class="kv-label">Click Probability</span><span class="kv-value">${p.click_probability}</span></div>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-title">Why This Prospect</div>
+      <div class="highlight">${p.reason || "—"}</div>
+    </div>
+    ${cig ? `
+    <div class="section">
+      <div class="section-title">Content Insertion Guide</div>
+      <div class="card">
+        <div class="kv-row"><span class="kv-label">Target Page Type</span><span class="kv-value">${cig.target_page_type || "—"}</span></div>
+        <div class="kv-row"><span class="kv-label">Anchor Text</span><span class="kv-value"><code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">${cig.suggested_anchor_text || "—"}</code></span></div>
+        ${cig.insertion_context ? `<div style="margin-top:10px"><div class="kv-label" style="margin-bottom:4px">Insertion Context</div><div class="mono">${cig.insertion_context.replace(/</g,"&lt;").replace(/>/g,"&gt;")}</div></div>` : ""}
+        ${cig.value_to_host ? `<div style="margin-top:8px"><div class="kv-label" style="margin-bottom:4px">Value to Host</div><div style="font-size:12px;color:#374151">${cig.value_to_host}</div></div>` : ""}
+      </div>
+    </div>` : ""}
+    <div class="section">
+      <div class="section-title">Existence Evidence</div>
+      <div class="card-sub" style="font-size:12px;font-style:italic">${p.existence_evidence || "—"}</div>
+    </div>`;
+}
+
+export function buildSingleChatMessage(msg: any, convTitle: string): string {
+  const isUser = msg.role === "user";
+  const accentColor = isUser ? "#6366f1" : "#16a34a";
+  const label = isUser ? "You" : "Signal AEO Assistant";
+  const time = msg.createdAt ? new Date(msg.createdAt).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" }) : "";
+  return `
+    <div class="section">
+      <div class="section-title">Conversation: ${convTitle}</div>
+    </div>
+    <div class="card" style="border-left:4px solid ${accentColor}">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:${accentColor};margin-bottom:10px">
+        ${label}${time ? ` · ${time}` : ""}
+      </div>
+      <div style="font-size:13px;white-space:pre-wrap;line-height:1.75">${(msg.content ?? "").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</div>
+    </div>`;
+}

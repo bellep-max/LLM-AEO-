@@ -2,7 +2,18 @@ import { useState, useRef, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Send, Plus, Trash2, TerminalSquare, Sparkles, Link2, Target, RotateCcw, FileDown } from "lucide-react";
-import { openPrintWindow, buildAnalyzerPdf, buildAuditPdf, buildBacklinksPdf, buildChatPdf } from "@/lib/pdf-export";
+import {
+  openPrintWindow,
+  buildAnalyzerPdf,
+  buildAuditPdf,
+  buildBacklinksPdf,
+  buildChatPdf,
+  buildSingleAuditKeyword,
+  buildSingleAuditPrompt,
+  buildSingleBacklinkOpp,
+  buildSingleLinkProspect,
+  buildSingleChatMessage,
+} from "@/lib/pdf-export";
 import {
   useListOpenaiConversations,
   getListOpenaiConversationsQueryKey,
@@ -813,7 +824,8 @@ export function ChatPage() {
                       <Button
                         variant="outline"
                         size="sm"
-                        className="gap-1.5"
+                        className="gap-1.5 text-muted-foreground"
+                        title="Download full Business Analyzer report as PDF"
                         onClick={() => openPrintWindow(
                           "Business Analyzer",
                           analysisData?.business_name || businessName,
@@ -821,7 +833,7 @@ export function ChatPage() {
                         )}
                       >
                         <FileDown className="h-3.5 w-3.5" />
-                        Download PDF
+                        Full Report PDF
                       </Button>
                     </div>
                   </CardContent>
@@ -958,21 +970,6 @@ export function ChatPage() {
 
             {auditData && (
               <>
-              <div className="flex justify-end">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-1.5"
-                  onClick={() => openPrintWindow(
-                    "Full AEO Audit",
-                    businessName,
-                    buildAuditPdf(auditData, businessName, websiteUrl || undefined, location || undefined)
-                  )}
-                >
-                  <FileDown className="h-3.5 w-3.5" />
-                  Download PDF
-                </Button>
-              </div>
               <div className="grid gap-6 xl:grid-cols-[1.5fr_1fr]">
                 {/* LEFT — ICE Keyword table */}
                 <div className="space-y-6">
@@ -994,11 +991,12 @@ export function ChatPage() {
                               <th className="px-3 py-2 text-center text-xs uppercase tracking-wide text-muted-foreground">Effort</th>
                               <th className="px-3 py-2 text-center text-xs uppercase tracking-wide text-muted-foreground">ICE</th>
                               <th className="px-4 py-2 text-center text-xs uppercase tracking-wide text-muted-foreground">Priority</th>
+                              <th className="px-2 py-2 w-8"></th>
                             </tr>
                           </thead>
                           <tbody>
                             {auditKeywords.map((kw) => (
-                              <tr key={kw.keyword} className="border-b border-border last:border-0 hover:bg-muted/30">
+                              <tr key={kw.keyword} className="border-b border-border last:border-0 hover:bg-muted/30 group">
                                 <td className="px-4 py-3 font-medium">{kw.keyword}</td>
                                 <td className="px-3 py-3 text-center">{kw.impact}</td>
                                 <td className="px-3 py-3 text-center">{kw.confidence}</td>
@@ -1008,6 +1006,19 @@ export function ChatPage() {
                                   <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold", priorityClass(kw.priority))}>
                                     {kw.priority}
                                   </span>
+                                </td>
+                                <td className="px-2 py-3 text-center">
+                                  <button
+                                    title="Download this keyword as PDF"
+                                    className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+                                    onClick={() => openPrintWindow(
+                                      "Keyword ICE Score",
+                                      kw.keyword,
+                                      buildSingleAuditKeyword(kw, businessName)
+                                    )}
+                                  >
+                                    <FileDown className="h-3.5 w-3.5" />
+                                  </button>
                                 </td>
                               </tr>
                             ))}
@@ -1022,10 +1033,25 @@ export function ChatPage() {
                 <div className="space-y-6">
                   <Card className="shadow-none">
                     <CardHeader>
-                      <CardTitle>Example AEO Prompt</CardTitle>
-                      <CardDescription className="font-mono text-xs">
-                        PQS = (PC_avg × 0.4) + (RC_avg × 0.6)
-                      </CardDescription>
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <CardTitle>Example AEO Prompt</CardTitle>
+                          <CardDescription className="font-mono text-xs">
+                            PQS = (PC_avg × 0.4) + (RC_avg × 0.6)
+                          </CardDescription>
+                        </div>
+                        <button
+                          title="Download prompt as PDF"
+                          className="text-muted-foreground hover:text-foreground transition-colors mt-0.5"
+                          onClick={() => openPrintWindow(
+                            "Example AEO Prompt",
+                            businessName,
+                            buildSingleAuditPrompt(auditData.example_prompt, auditData.required_searches, businessName)
+                          )}
+                        >
+                          <FileDown className="h-4 w-4" />
+                        </button>
+                      </div>
                     </CardHeader>
                     <CardContent className="space-y-4">
                       <div className="rounded-lg bg-muted/50 p-3 text-sm leading-relaxed">
@@ -1254,28 +1280,11 @@ export function ChatPage() {
                   {bd.strategy_summary && (
                     <Card className="shadow-none">
                       <CardHeader>
-                        <div className="flex items-start justify-between gap-2">
-                          <div>
-                            <CardTitle>Strategy Summary</CardTitle>
-                            <CardDescription>
-                              {opps.length} opportunities for <span className="font-medium">{bd.target_keyword}</span>
-                              {bd.competitors_analysed?.length ? ` · ${bd.competitors_analysed.length} competitor(s) analysed` : ""}
-                            </CardDescription>
-                          </div>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="gap-1.5 shrink-0"
-                            onClick={() => openPrintWindow(
-                              "Backlinks Injection",
-                              bd.target_keyword || blKeyword,
-                              buildBacklinksPdf(bd)
-                            )}
-                          >
-                            <FileDown className="h-3.5 w-3.5" />
-                            Download PDF
-                          </Button>
-                        </div>
+                        <CardTitle>Strategy Summary</CardTitle>
+                        <CardDescription>
+                          {opps.length} opportunities for <span className="font-medium">{bd.target_keyword}</span>
+                          {bd.competitors_analysed?.length ? ` · ${bd.competitors_analysed.length} competitor(s) analysed` : ""}
+                        </CardDescription>
                       </CardHeader>
                       <CardContent>
                         <p className="text-sm text-muted-foreground">{bd.strategy_summary}</p>
@@ -1324,9 +1333,25 @@ export function ChatPage() {
                               </div>
                               <p className="mt-1 text-xs text-muted-foreground truncate">{opp.platform_url}</p>
                             </div>
-                            <span className="text-xs text-muted-foreground shrink-0 mt-1">
-                              {expandedBl === i ? "▲ hide" : "▼ show"}
-                            </span>
+                            <div className="flex items-center gap-2 shrink-0 mt-1">
+                              <button
+                                title="Download this backlink as PDF"
+                                className="text-muted-foreground hover:text-foreground transition-colors"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openPrintWindow(
+                                    "Backlink Opportunity",
+                                    opp.platform_name,
+                                    buildSingleBacklinkOpp(opp, i, bd.target_keyword || blKeyword)
+                                  );
+                                }}
+                              >
+                                <FileDown className="h-3.5 w-3.5" />
+                              </button>
+                              <span className="text-xs text-muted-foreground">
+                                {expandedBl === i ? "▲ hide" : "▼ show"}
+                              </span>
+                            </div>
                           </div>
                         </CardHeader>
 
@@ -1539,9 +1564,25 @@ export function ChatPage() {
                                     </span>
                                   </div>
                                 </div>
-                                <span className="text-xs text-muted-foreground shrink-0 mt-1">
-                                  {expandedLp === i ? "▲" : "▼"}
-                                </span>
+                                <div className="flex items-center gap-2 shrink-0 mt-1">
+                                  <button
+                                    title="Download this prospect as PDF"
+                                    className="text-muted-foreground hover:text-foreground transition-colors"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      openPrintWindow(
+                                        "Link Prospect",
+                                        p.website_url,
+                                        buildSingleLinkProspect(p, ld.target_keyword || lpKeyword)
+                                      );
+                                    }}
+                                  >
+                                    <FileDown className="h-3.5 w-3.5" />
+                                  </button>
+                                  <span className="text-xs text-muted-foreground">
+                                    {expandedLp === i ? "▲" : "▼"}
+                                  </span>
+                                </div>
                               </div>
                             </CardHeader>
 
@@ -2024,26 +2065,6 @@ export function ChatPage() {
 
           {/* Chat messages + input */}
           <div className="flex-1 flex flex-col bg-background min-h-0">
-            {messages.length > 0 && (
-              <div className="flex justify-end px-4 py-2 border-b border-border bg-card/30">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-1.5"
-                  onClick={() => {
-                    const conv = conversations.find(c => c.id === activeId);
-                    openPrintWindow(
-                      "Chat Conversation",
-                      conv?.title || "Signal AEO Assistant",
-                      buildChatPdf(messages as any[], conv?.title || "Signal AEO Assistant")
-                    );
-                  }}
-                >
-                  <FileDown className="h-3.5 w-3.5" />
-                  Download PDF
-                </Button>
-              </div>
-            )}
             <div
               ref={scrollRef}
               className="flex-1 overflow-y-auto p-4 sm:p-8 space-y-6"
@@ -2057,11 +2078,14 @@ export function ChatPage() {
                 <>
                   {loadingMessages && activeId ? (
                     <div className="text-center text-muted-foreground">Loading messages...</div>
-                  ) : messages.map((msg: any) => (
+                  ) : messages.map((msg: any) => {
+                    const conv = conversations.find(c => c.id === activeId);
+                    const convTitle = conv?.title || "Signal AEO Assistant";
+                    return (
                     <div
                       key={msg.id}
                       className={cn(
-                        "max-w-2xl flex flex-col",
+                        "max-w-2xl flex flex-col group",
                         msg.role === "user" ? "ml-auto items-end" : "mr-auto items-start"
                       )}
                     >
@@ -2077,14 +2101,31 @@ export function ChatPage() {
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
                         )}
                       </div>
-                      {msg.role === "assistant" && (msg.tokensUsed || msg.responseTimeMs) && (
-                        <div className="text-[10px] text-muted-foreground mt-1 px-1 flex gap-2">
-                          {msg.tokensUsed && <span>{msg.tokensUsed} tokens</span>}
-                          {msg.responseTimeMs && <span>{msg.responseTimeMs}ms</span>}
-                        </div>
-                      )}
+                      <div className={cn(
+                        "flex items-center gap-2 mt-1 px-1",
+                        msg.role === "user" ? "flex-row-reverse" : "flex-row"
+                      )}>
+                        {msg.role === "assistant" && (msg.tokensUsed || msg.responseTimeMs) && (
+                          <div className="text-[10px] text-muted-foreground flex gap-2">
+                            {msg.tokensUsed && <span>{msg.tokensUsed} tokens</span>}
+                            {msg.responseTimeMs && <span>{msg.responseTimeMs}ms</span>}
+                          </div>
+                        )}
+                        <button
+                          title="Download this message as PDF"
+                          className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+                          onClick={() => openPrintWindow(
+                            msg.role === "assistant" ? "AEO Assistant Response" : "Your Message",
+                            convTitle,
+                            buildSingleChatMessage(msg, convTitle)
+                          )}
+                        >
+                          <FileDown className="h-3 w-3" />
+                        </button>
+                      </div>
                     </div>
-                  ))}
+                    );
+                  })}
 
                   {isStreaming && streamingText && (
                     <div className="max-w-2xl mr-auto items-start flex flex-col">
