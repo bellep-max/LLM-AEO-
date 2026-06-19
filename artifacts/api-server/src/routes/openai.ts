@@ -467,20 +467,55 @@ function buildAuditPrompt(
   websiteUrl?: string,
   location?: string,
 ): string {
-  return `You are an Answer Engine Optimization (AEO) expert. Your task is to produce a complete AEO audit and action plan for a given business. Follow the instructions exactly. Output ONLY valid JSON. Do not include any explanatory text outside the JSON.
+  const hasWebsite  = !!websiteUrl;
+  const hasLocation = !!location;
+
+  const websiteAnalysisStep = hasWebsite ? `
+
+STEP 5 - Website AEO Analysis (website URL was provided — this step is REQUIRED):
+   You cannot crawl the URL, but infer AEO readiness from the domain, business description, type, and size.
+   a) aeo_readiness_score: integer 1-10. Base it on how well a typical ${businessType} business of this size usually implements AEO. Adjust up if the domain looks authoritative, down if the description suggests thin/generic content.
+   b) aeo_readiness_rationale: 1-2 sentences explaining the score.
+   c) missing_schema_types: 3 schema.org types this site most likely lacks. Pick from: LocalBusiness, Service, FAQPage, HowTo, Product, Review, BreadcrumbList, WebSite, Organization, Person, MedicalBusiness, LegalService, FinancialService. Choose types that are most impactful for this business type.
+   d) technical_aeo_gaps: 3 specific AEO gaps that are common for this business type — each with a concrete fix. Examples: "No FAQ page → Add an FAQ page answering the top 5 questions AI engines ask about this service", "Missing LocalBusiness schema → Add JSON-LD with address, phone, hours, and service area".
+   e) content_recommendations: 2 specific page or content additions that would most improve AEO visibility for this business at this URL. Be specific — name the page title and explain exactly what it should contain.
+   f) location_optimization_score: integer 1-10. How well the site likely targets ${hasLocation ? location : "its local market"} based on the business description. Deduct points for generic national content with no local signals.
+   g) location_optimization_notes: 1-2 sentences on what local AEO signals are likely missing.` : "";
+
+  const websiteJsonField = hasWebsite ? `,
+  "website_analysis": {
+    "url": "${websiteUrl}",
+    "location": "${location || "not specified"}",
+    "aeo_readiness_score": 0,
+    "aeo_readiness_rationale": "...",
+    "missing_schema_types": ["...", "...", "..."],
+    "technical_aeo_gaps": [
+      {"gap": "...", "fix": "..."},
+      {"gap": "...", "fix": "..."},
+      {"gap": "...", "fix": "..."}
+    ],
+    "content_recommendations": [
+      {"title": "...", "why": "..."},
+      {"title": "...", "why": "..."}
+    ],
+    "location_optimization_score": 0,
+    "location_optimization_notes": "..."
+  }` : "";
+
+  return `You are an Answer Engine Optimization (AEO) expert. Your task is to produce a complete AEO audit and action plan for a given business. Follow ALL steps exactly. Output ONLY valid JSON. Do not include any explanatory text outside the JSON.
 
 --- USER INPUT ---
 Business description: ${businessDescription}
 Business size: ${businessSize}
 Business type: ${businessType}
-Competitor density (1-5, optional): ${competitorDensity || "(infer from type and size)"}${websiteUrl ? `\nWebsite URL: ${websiteUrl}` : ""}${location ? `\nLocation / City: ${location}` : ""}${location ? `\n\nIMPORTANT: This business operates in ${location}. Tailor all keywords, prompts, and backlink sources to this specific geographic market.` : ""}${websiteUrl ? `\nThe website is ${websiteUrl} — use this domain when constructing example backlink strategies and prompt examples.` : ""}
+Competitor density (1-5, optional): ${competitorDensity || "(infer from type and size)"}${hasWebsite ? `\nWebsite URL: ${websiteUrl}` : ""}${hasLocation ? `\nLocation / City: ${location}` : ""}${hasLocation ? `\n\nIMPORTANT: This business operates in ${location}. All keywords, prompts, and backlink sources MUST be targeted to this specific geographic market.` : ""}${hasWebsite ? `\nThe website is ${websiteUrl} — use this domain in example backlink anchors and prompt examples.` : ""}
 
 --- RULES AND FORMULAS ---
 
 STEP 1 - Generate 5 AEO keywords. For each: assign Impact (1-5), Confidence (1-5), Effort (1-5). Then:
    Ease = 6 - Effort
    Weighted ICE = (wI * Impact) + (wC * Confidence) + (wE * Ease)
-
+${hasLocation ? `   All keywords MUST include or imply "${location}" or a neighborhood within it.` : ""}
    Weights by business type:
    - local brick-and-mortar: wI=0.60, wC=0.25, wE=0.15
    - B2B SaaS:               wI=0.55, wC=0.30, wE=0.15
@@ -500,6 +535,7 @@ STEP 2 - Generate 1 example AEO prompt. Score with PEEM:
    RC_avg = average of (Accuracy, Coherence, Relevance, Objectivity, Clarity, Conciseness) each 1-5
    PQS = (PC_avg * 0.4) + (RC_avg * 0.6)
    meets_threshold = PQS >= minimum (local=3.5, B2B SaaS/e-commerce=4.0, healthcare/legal=4.5, other/news=3.8)
+${hasWebsite ? `   The prompt should reference ${websiteUrl} or its services specifically.` : ""}
 
 STEP 3 - Required AI searches:
    Infer Competitor Density (1-5) if not provided:
@@ -514,8 +550,9 @@ STEP 4 - Backlink strategy (3 sources):
    Sources by type: local=local news/chamber/vendor; B2B SaaS=comparison posts/G2/partners;
    e-commerce=review blogs/affiliates/best-of; healthcare=.gov/.edu/associations;
    legal=state bar/journals/.gov; news=social/aggregators/wire; other=forums/directories/guest posts
+${hasLocation ? `   Prefer backlink sources in or specifically covering ${location}.` : ""}${websiteAnalysisStep}
 
-STEP 5 - Return ONLY this JSON (no extra text, no markdown):
+STEP ${hasWebsite ? "6" : "5"} - Return ONLY this JSON (no extra text, no markdown):
 {
   "business_type": "...",
   "business_size": "...",
@@ -537,7 +574,7 @@ STEP 5 - Return ONLY this JSON (no extra text, no markdown):
   "backlink_strategy": [
     {"source_type": "...", "clickable": true, "estimated_bqs": 0.00, "reasoning": "..."}
   ],
-  "disclaimer": "For YMYL industries, consult compliance before implementation."
+  "disclaimer": "For YMYL industries, consult compliance before implementation."${websiteJsonField}
 }`;
 }
 

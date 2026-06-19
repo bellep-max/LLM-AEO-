@@ -170,6 +170,18 @@ type BacklinksResult = {
   trace_url?: string | null;
 };
 
+type WebsiteAnalysis = {
+  url?: string;
+  location?: string;
+  aeo_readiness_score?: number;
+  aeo_readiness_rationale?: string;
+  missing_schema_types?: string[];
+  technical_aeo_gaps?: { gap: string; fix: string }[];
+  content_recommendations?: { title: string; why: string }[];
+  location_optimization_score?: number;
+  location_optimization_notes?: string;
+};
+
 type BusinessAuditResult = {
   data: {
     business_type?: string;
@@ -189,6 +201,7 @@ type BusinessAuditResult = {
     };
     backlink_strategy?: AuditBacklink[];
     disclaimer?: string;
+    website_analysis?: WebsiteAnalysis;
   };
   tokens_used: number;
   trace_url?: string | null;
@@ -970,6 +983,115 @@ export function ChatPage() {
 
             {auditData && (
               <>
+
+              {/* ── Website & Location Analysis card (shown when either was provided) ── */}
+              {(auditData.website_analysis || websiteUrl || location) && (
+                <Card className="shadow-none border-primary/20">
+                  <CardHeader className="pb-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <CardTitle className="flex items-center gap-2 text-base">
+                          <Target className="h-4 w-4 text-primary" />
+                          Website &amp; Location Analysis
+                        </CardTitle>
+                        <CardDescription className="mt-0.5 text-xs">
+                          {websiteUrl && <span>Auditing <a href={websiteUrl} target="_blank" rel="noreferrer" className="text-primary underline-offset-2 hover:underline font-medium">{websiteUrl}</a></span>}
+                          {websiteUrl && location && <span className="mx-1.5 text-muted-foreground/50">·</span>}
+                          {location && <span>Market: <strong>{location}</strong></span>}
+                        </CardDescription>
+                      </div>
+                      {auditData.website_analysis && (
+                        <div className="flex items-center gap-3 shrink-0">
+                          {auditData.website_analysis.aeo_readiness_score != null && (
+                            <div className="text-right">
+                              <div className="text-xs text-muted-foreground">AEO Readiness</div>
+                              <div className="text-xl font-bold">
+                                {auditData.website_analysis.aeo_readiness_score}
+                                <span className="text-xs font-normal text-muted-foreground">/10</span>
+                              </div>
+                            </div>
+                          )}
+                          {auditData.website_analysis.location_optimization_score != null && location && (
+                            <div className="text-right">
+                              <div className="text-xs text-muted-foreground">Local Score</div>
+                              <div className="text-xl font-bold">
+                                {auditData.website_analysis.location_optimization_score}
+                                <span className="text-xs font-normal text-muted-foreground">/10</span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </CardHeader>
+
+                  {auditData.website_analysis && (
+                    <CardContent className="space-y-4 pt-0">
+                      {/* Rationale */}
+                      {auditData.website_analysis.aeo_readiness_rationale && (
+                        <p className="text-sm text-muted-foreground border-l-2 border-primary/30 pl-3">
+                          {auditData.website_analysis.aeo_readiness_rationale}
+                        </p>
+                      )}
+
+                      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                        {/* Missing schema types */}
+                        {(auditData.website_analysis.missing_schema_types ?? []).length > 0 && (
+                          <div>
+                            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Missing Schema Types</div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {auditData.website_analysis.missing_schema_types!.map((s) => (
+                                <span key={s} className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium bg-rose-500/10 border-rose-500/30 text-rose-600">
+                                  {s}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Location optimization notes */}
+                        {auditData.website_analysis.location_optimization_notes && location && (
+                          <div className="xl:col-span-2">
+                            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Local Market Gap</div>
+                            <p className="text-sm text-muted-foreground">{auditData.website_analysis.location_optimization_notes}</p>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Technical AEO gaps */}
+                      {(auditData.website_analysis.technical_aeo_gaps ?? []).length > 0 && (
+                        <div>
+                          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Technical AEO Gaps</div>
+                          <div className="space-y-2">
+                            {auditData.website_analysis.technical_aeo_gaps!.map((g, i) => (
+                              <div key={i} className="rounded-lg border bg-muted/30 px-3 py-2.5">
+                                <div className="text-sm font-medium text-foreground">{g.gap}</div>
+                                <div className="text-xs text-muted-foreground mt-0.5">→ {g.fix}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Content recommendations */}
+                      {(auditData.website_analysis.content_recommendations ?? []).length > 0 && (
+                        <div>
+                          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Content to Add</div>
+                          <div className="grid gap-2 sm:grid-cols-2">
+                            {auditData.website_analysis.content_recommendations!.map((c, i) => (
+                              <div key={i} className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2.5">
+                                <div className="text-sm font-semibold text-foreground">{c.title}</div>
+                                <div className="text-xs text-muted-foreground mt-0.5">{c.why}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </CardContent>
+                  )}
+                </Card>
+              )}
+
               <div className="grid gap-6 xl:grid-cols-[1.5fr_1fr]">
                 {/* LEFT — ICE Keyword table */}
                 <div className="space-y-6">
