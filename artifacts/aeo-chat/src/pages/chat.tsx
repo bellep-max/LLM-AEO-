@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Send, Plus, Trash2, TerminalSquare, Sparkles, Link2, Target, RotateCcw } from "lucide-react";
+import { Send, Plus, Trash2, TerminalSquare, Sparkles, Link2, Target, RotateCcw, FileDown } from "lucide-react";
+import { openPrintWindow, buildAnalyzerPdf, buildAuditPdf, buildBacklinksPdf, buildChatPdf } from "@/lib/pdf-export";
 import {
   useListOpenaiConversations,
   getListOpenaiConversationsQueryKey,
@@ -237,6 +238,8 @@ export function ChatPage() {
   const [businessTypeOther, setBusinessTypeOther] = useState("");
   const [businessSize, setBusinessSize] = useState("small");
   const [competitorDensity, setCompetitorDensity] = useState("");
+  const [websiteUrl, setWebsiteUrl] = useState("");
+  const [location, setLocation] = useState("");
   const [auditResult, setAuditResult] = useState<BusinessAuditResult | null>(null);
   const [auditError, setAuditError] = useState<string | null>(null);
   const [isAuditing, setIsAuditing] = useState(false);
@@ -294,6 +297,8 @@ export function ChatPage() {
     setBusinessTypeOther("");
     setBusinessSize("small");
     setCompetitorDensity("");
+    setWebsiteUrl("");
+    setLocation("");
     setAuditResult(null);
     setAuditError(null);
   };
@@ -505,6 +510,8 @@ export function ChatPage() {
             : businessType,
           businessSize,
           competitorDensity,
+          websiteUrl: websiteUrl.trim() || undefined,
+          location: location.trim() || undefined,
         }),
       });
       const payload = await res.json();
@@ -803,6 +810,19 @@ export function ChatPage() {
                       <Button variant="outline" size="sm" onClick={() => setActiveView("backlinks")}>
                         View Backlinks Injection →
                       </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-1.5"
+                        onClick={() => openPrintWindow(
+                          "Business Analyzer",
+                          analysisData?.business_name || businessName,
+                          buildAnalyzerPdf(analysisData, businessName)
+                        )}
+                      >
+                        <FileDown className="h-3.5 w-3.5" />
+                        Download PDF
+                      </Button>
                     </div>
                   </CardContent>
                 </Card>
@@ -902,6 +922,27 @@ export function ChatPage() {
                       disabled={isAuditing}
                     />
                   )}
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="flex flex-col gap-1.5">
+                      <Label>Website URL <span className="text-xs text-muted-foreground">(optional)</span></Label>
+                      <Input
+                        value={websiteUrl}
+                        onChange={(e) => setWebsiteUrl(e.target.value)}
+                        placeholder="e.g. https://americanplumbing.com"
+                        disabled={isAuditing}
+                        type="url"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <Label>Location / City <span className="text-xs text-muted-foreground">(optional)</span></Label>
+                      <Input
+                        value={location}
+                        onChange={(e) => setLocation(e.target.value)}
+                        placeholder="e.g. San Diego, CA"
+                        disabled={isAuditing}
+                      />
+                    </div>
+                  </div>
                   <Button
                     type="submit"
                     className="gap-2 self-start"
@@ -916,6 +957,22 @@ export function ChatPage() {
             </Card>
 
             {auditData && (
+              <>
+              <div className="flex justify-end">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => openPrintWindow(
+                    "Full AEO Audit",
+                    businessName,
+                    buildAuditPdf(auditData, businessName, websiteUrl || undefined, location || undefined)
+                  )}
+                >
+                  <FileDown className="h-3.5 w-3.5" />
+                  Download PDF
+                </Button>
+              </div>
               <div className="grid gap-6 xl:grid-cols-[1.5fr_1fr]">
                 {/* LEFT — ICE Keyword table */}
                 <div className="space-y-6">
@@ -1045,6 +1102,7 @@ export function ChatPage() {
                   </Card>
                 </div>
               </div>
+              </>
             )}
           </div>
         </TabsContent>
@@ -1196,11 +1254,28 @@ export function ChatPage() {
                   {bd.strategy_summary && (
                     <Card className="shadow-none">
                       <CardHeader>
-                        <CardTitle>Strategy Summary</CardTitle>
-                        <CardDescription>
-                          {opps.length} opportunities for <span className="font-medium">{bd.target_keyword}</span>
-                          {bd.competitors_analysed?.length ? ` · ${bd.competitors_analysed.length} competitor(s) analysed` : ""}
-                        </CardDescription>
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <CardTitle>Strategy Summary</CardTitle>
+                            <CardDescription>
+                              {opps.length} opportunities for <span className="font-medium">{bd.target_keyword}</span>
+                              {bd.competitors_analysed?.length ? ` · ${bd.competitors_analysed.length} competitor(s) analysed` : ""}
+                            </CardDescription>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="gap-1.5 shrink-0"
+                            onClick={() => openPrintWindow(
+                              "Backlinks Injection",
+                              bd.target_keyword || blKeyword,
+                              buildBacklinksPdf(bd)
+                            )}
+                          >
+                            <FileDown className="h-3.5 w-3.5" />
+                            Download PDF
+                          </Button>
+                        </div>
                       </CardHeader>
                       <CardContent>
                         <p className="text-sm text-muted-foreground">{bd.strategy_summary}</p>
@@ -1949,6 +2024,26 @@ export function ChatPage() {
 
           {/* Chat messages + input */}
           <div className="flex-1 flex flex-col bg-background min-h-0">
+            {messages.length > 0 && (
+              <div className="flex justify-end px-4 py-2 border-b border-border bg-card/30">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => {
+                    const conv = conversations.find(c => c.id === activeId);
+                    openPrintWindow(
+                      "Chat Conversation",
+                      conv?.title || "Signal AEO Assistant",
+                      buildChatPdf(messages as any[], conv?.title || "Signal AEO Assistant")
+                    );
+                  }}
+                >
+                  <FileDown className="h-3.5 w-3.5" />
+                  Download PDF
+                </Button>
+              </div>
+            )}
             <div
               ref={scrollRef}
               className="flex-1 overflow-y-auto p-4 sm:p-8 space-y-6"

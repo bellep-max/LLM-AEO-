@@ -464,6 +464,8 @@ function buildAuditPrompt(
   businessSize: string,
   businessType: string,
   competitorDensity: string,
+  websiteUrl?: string,
+  location?: string,
 ): string {
   return `You are an Answer Engine Optimization (AEO) expert. Your task is to produce a complete AEO audit and action plan for a given business. Follow the instructions exactly. Output ONLY valid JSON. Do not include any explanatory text outside the JSON.
 
@@ -471,7 +473,7 @@ function buildAuditPrompt(
 Business description: ${businessDescription}
 Business size: ${businessSize}
 Business type: ${businessType}
-Competitor density (1-5, optional): ${competitorDensity || "(infer from type and size)"}
+Competitor density (1-5, optional): ${competitorDensity || "(infer from type and size)"}${websiteUrl ? `\nWebsite URL: ${websiteUrl}` : ""}${location ? `\nLocation / City: ${location}` : ""}${location ? `\n\nIMPORTANT: This business operates in ${location}. Tailor all keywords, prompts, and backlink sources to this specific geographic market.` : ""}${websiteUrl ? `\nThe website is ${websiteUrl} — use this domain when constructing example backlink strategies and prompt examples.` : ""}
 
 --- RULES AND FORMULAS ---
 
@@ -545,6 +547,8 @@ router.post("/openai/business-audit", async (req, res) => {
   const businessType        = typeof req.body?.businessType        === "string" ? req.body.businessType               : "other";
   const businessSize        = typeof req.body?.businessSize        === "string" ? req.body.businessSize               : "small";
   const competitorDensity   = typeof req.body?.competitorDensity   === "string" ? req.body.competitorDensity          : "";
+  const websiteUrl          = typeof req.body?.websiteUrl          === "string" ? req.body.websiteUrl.trim()          : undefined;
+  const location            = typeof req.body?.location            === "string" ? req.body.location.trim()            : undefined;
 
   if (!businessName || !description) {
     res.status(400).json({ error: "businessName and description are required" });
@@ -564,6 +568,8 @@ router.post("/openai/business-audit", async (req, res) => {
         business_size:        businessSize,
         business_type:        businessType,
         competitor_density:   competitorDensity,
+        website_url:          websiteUrl,
+        location:             location,
       }),
     });
     if (aeoRes.ok) {
@@ -579,7 +585,7 @@ router.post("/openai/business-audit", async (req, res) => {
 
   // 2. Direct LLM fallback
   try {
-    const prompt = buildAuditPrompt(businessDescription, businessSize, businessType, competitorDensity);
+    const prompt = buildAuditPrompt(businessDescription, businessSize, businessType, competitorDensity, websiteUrl, location);
     const startTime = Date.now();
 
     const completion = await createCompletion({
@@ -606,7 +612,7 @@ router.post("/openai/business-audit", async (req, res) => {
       model: completion._model_used ?? CHAT_MODEL,
       messages: [
         { role: "system", content: "You are a senior AEO strategist. Return only valid JSON, no markdown." },
-        { role: "user",   content: buildAuditPrompt(businessDescription, businessSize, businessType, competitorDensity) },
+        { role: "user",   content: buildAuditPrompt(businessDescription, businessSize, businessType, competitorDensity, websiteUrl, location) },
       ],
       responseContent: completion.choices[0]?.message?.content ?? "",
       usage: completion.usage,
