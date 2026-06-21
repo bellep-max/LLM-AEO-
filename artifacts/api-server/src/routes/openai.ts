@@ -1642,7 +1642,7 @@ Business categories: ${categories.join(", ")}
 TASK: Generate a complete AEO keyword strategy. Return ONLY valid JSON, no markdown.
 
 For each city produce:
-- City profile with 5 local target areas (neighborhoods/districts)
+- City profile with 6–8 local target areas (neighborhoods, boroughs, districts, ZIP zones)
 - For EACH category × city combination: ${kwPerType} big-city keywords, ${kwPerType} local (neighborhood) keywords, ${nearMeCount} "near me" keywords
 - Each keyword needs: keyword text, location, volume (High/Medium/Low), competition (Very High/High/Medium/Low), intent (Transactional/Commercial/Informational), conversion (High/Medium/Low), aeo_angle (1 sentence on how it gets into AI answers), explanation (1 sentence strategic rationale)
 - A strategic explanation section covering big city rationale, local rationale, combined approach, content strategy, and 5 AEO-specific tips

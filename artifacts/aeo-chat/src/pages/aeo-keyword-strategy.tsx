@@ -12,8 +12,13 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const US_CITIES = [
-  "New York", "Los Angeles", "Chicago", "Houston", "Phoenix",
-  "Philadelphia", "San Antonio", "San Diego", "Dallas", "San Jose",
+  // Top 10 by population
+  "New York",      "Los Angeles",  "Chicago",     "Houston",      "Phoenix",
+  "Philadelphia",  "San Antonio",  "San Diego",   "Dallas",       "San Jose",
+  // Major economic/cultural hubs
+  "Miami",         "Atlanta",      "Seattle",      "Boston",       "Denver",
+  "Las Vegas",     "Portland",     "Nashville",    "Austin",       "Charlotte",
+  "Minneapolis",   "Tampa",        "New Orleans",  "Washington DC","San Francisco",
 ];
 
 const BUSINESS_CATEGORIES = [
@@ -312,12 +317,12 @@ function CategoryPanel({ sets }: { sets: CategoryKeywords[] }) {
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export function AEOKeywordStrategyPage() {
-  const [selectedCities, setSelectedCities] = useState<string[]>(["New York", "Los Angeles", "Chicago"]);
+  const [selectedCities, setSelectedCities] = useState<string[]>(["New York", "Los Angeles", "Chicago", "Miami", "Atlanta", "Houston"]);
   const [selectedCategories, setSelectedCategories] = useState<string[]>(BUSINESS_CATEGORIES);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<AEOStrategyResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState("cities");
+  const [activeTab, setActiveTab] = useState("local");
   const [activeCategory, setActiveCategory] = useState<string>("");
 
   function toggleCity(city: string) {
@@ -349,7 +354,7 @@ export function AEOKeywordStrategyPage() {
       }
       const data: AEOStrategyResult = await res.json();
       setResult(data);
-      setActiveTab("cities");
+      setActiveTab("local");
       const firstCat = data.keywords?.[0]?.category ?? "";
       setActiveCategory(firstCat);
     } catch (e: unknown) {
@@ -381,7 +386,9 @@ export function AEOKeywordStrategyPage() {
         {/* City selector */}
         <div className="p-4 border-b border-border">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Target Cities</span>
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Target Cities ({selectedCities.length}/{US_CITIES.length})
+            </span>
             <button
               className="text-[10px] text-primary hover:underline"
               onClick={() =>
@@ -393,7 +400,7 @@ export function AEOKeywordStrategyPage() {
               {selectedCities.length === US_CITIES.length ? "None" : "All"}
             </button>
           </div>
-          <div className="space-y-1.5">
+          <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
             {US_CITIES.map(city => (
               <label key={city} className="flex items-center gap-2 cursor-pointer group">
                 <input
@@ -523,12 +530,44 @@ export function AEOKeywordStrategyPage() {
             {/* Main tabs */}
             <Tabs value={activeTab} onValueChange={setActiveTab}>
               <TabsList className="h-9">
-                <TabsTrigger value="cities" className="text-xs">Cities &amp; Local Areas</TabsTrigger>
+                <TabsTrigger value="local" className="text-xs">Local Areas</TabsTrigger>
+                <TabsTrigger value="cities" className="text-xs">City Profiles</TabsTrigger>
                 <TabsTrigger value="keywords" className="text-xs">AEO Keywords</TabsTrigger>
                 <TabsTrigger value="strategy" className="text-xs">Strategy &amp; Tips</TabsTrigger>
               </TabsList>
 
-              {/* CITIES TAB */}
+              {/* LOCAL AREAS TAB */}
+              <TabsContent value="local" className="mt-4 space-y-4">
+                {(result.cities ?? []).map(city => (
+                  <Card key={city.name} className="shadow-none">
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-sm flex items-center gap-2">
+                        <MapPin className="h-4 w-4 text-primary" />
+                        {city.name}
+                        <span className="text-xs font-normal text-muted-foreground ml-1">— {(city.local_areas ?? []).length} local target areas</span>
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="pt-0">
+                      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                        {(city.local_areas ?? []).map(area => (
+                          <div key={area.name} className="rounded-lg border bg-muted/20 p-3">
+                            <div className="font-semibold text-sm text-foreground">{area.name}</div>
+                            <div className="text-[10px] text-muted-foreground mt-0.5">
+                              Pop: {area.population}
+                              {area.zip_codes?.length > 0 && (
+                                <span className="ml-2">ZIP: {area.zip_codes.join(", ")}</span>
+                              )}
+                            </div>
+                            <div className="text-xs text-foreground mt-2 leading-relaxed border-t pt-2">{area.why_target}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </TabsContent>
+
+              {/* CITY PROFILES TAB */}
               <TabsContent value="cities" className="mt-4 space-y-4">
                 {(result.cities ?? []).map(city => (
                   <CityCard key={city.name} city={city} />
