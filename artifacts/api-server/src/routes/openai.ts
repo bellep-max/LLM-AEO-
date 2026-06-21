@@ -459,122 +459,280 @@ router.post("/openai/business-analysis", async (req, res) => {
   }
 });
 
+// ── Website content fetcher ───────────────────────────────────────────────────
+
+type FetchedSite = {
+  ssl: boolean;
+  meta_title?: string;
+  meta_description?: string;
+  h1s: string[];
+  word_count: number;
+  has_mobile_viewport: boolean;
+  body_excerpt: string;
+  fetch_success: boolean;
+  fetch_error?: string;
+};
+
+async function fetchWebsiteContent(url: string): Promise<FetchedSite> {
+  const ssl = url.startsWith("https://");
+  const empty: FetchedSite = { ssl, h1s: [], word_count: 0, has_mobile_viewport: false, body_excerpt: "", fetch_success: false };
+  try {
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), 7000);
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; AEOAuditBot/1.0)", Accept: "text/html" },
+    });
+    clearTimeout(t);
+    if (!res.ok) return { ...empty, fetch_error: `HTTP ${res.status}` };
+
+    const html = await res.text();
+
+    const titleMatch  = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+    const meta_title  = titleMatch ? titleMatch[1].replace(/<[^>]+>/g, "").trim() : undefined;
+
+    const metaDescMatch = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([\s\S]*?)["']/i)
+                       ?? html.match(/<meta[^>]*content=["']([\s\S]*?)["'][^>]*name=["']description["']/i);
+    const meta_description = metaDescMatch ? metaDescMatch[1].trim() : undefined;
+
+    const h1Matches = [...html.matchAll(/<h1[^>]*>([\s\S]*?)<\/h1>/gi)];
+    const h1s = h1Matches.map(m => m[1].replace(/<[^>]+>/g, "").trim()).filter(Boolean).slice(0, 5);
+
+    const has_mobile_viewport = /<meta[^>]*name=["']viewport["']/i.test(html);
+
+    const stripped = html
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&[a-z]+;/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    const word_count  = stripped.split(/\s+/).filter(Boolean).length;
+    const body_excerpt = stripped.slice(0, 2000);
+
+    return { ssl, meta_title, meta_description, h1s, word_count, has_mobile_viewport, body_excerpt, fetch_success: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ...empty, fetch_error: msg.includes("abort") ? "Timeout (7 s)" : msg.slice(0, 120) };
+  }
+}
+
+// ── Audit prompt (v2) ─────────────────────────────────────────────────────────
+
 function buildAuditPrompt(
   businessDescription: string,
   businessSize: string,
   businessType: string,
-  competitorDensity: string,
+  competitorCount: string,
   websiteUrl?: string,
   location?: string,
+  site?: FetchedSite,
 ): string {
   const hasWebsite  = !!websiteUrl;
   const hasLocation = !!location;
 
-  const websiteAnalysisStep = hasWebsite ? `
+  // ── Local Advantage rule (v2 spec) ────────────────────────────────────────
+  const isLocalService = /local service|local brick|plumb|electr|hvac|landscap|clean|repair|mechanic|salon|barber|dentist|doctor|clinic|restaurant|cafe|bakery/i.test(businessType + " " + businessDescription);
+  const laRule =
+    isLocalService && hasLocation ? "Local Service + Location = 1.0" :
+    isLocalService && !hasLocation ? "Local Service + No Location = 0.2" :
+    !isLocalService && hasLocation ? "Non-Local + Location = 0.5" :
+    "Non-Local + No Location = 0";
+  const laValue =
+    isLocalService && hasLocation ? 1.0 :
+    isLocalService && !hasLocation ? 0.2 :
+    !isLocalService && hasLocation ? 0.5 : 0;
 
-STEP 5 - Website AEO Analysis (website URL was provided — this step is REQUIRED):
-   You cannot crawl the URL, but infer AEO readiness from the domain, business description, type, and size.
-   a) aeo_readiness_score: integer 1-10. Base it on how well a typical ${businessType} business of this size usually implements AEO. Adjust up if the domain looks authoritative, down if the description suggests thin/generic content.
-   b) aeo_readiness_rationale: 1-2 sentences explaining the score.
-   c) missing_schema_types: 3 schema.org types this site most likely lacks. Pick from: LocalBusiness, Service, FAQPage, HowTo, Product, Review, BreadcrumbList, WebSite, Organization, Person, MedicalBusiness, LegalService, FinancialService. Choose types that are most impactful for this business type.
-   d) technical_aeo_gaps: 3 specific AEO gaps that are common for this business type — each with a concrete fix. Examples: "No FAQ page → Add an FAQ page answering the top 5 questions AI engines ask about this service", "Missing LocalBusiness schema → Add JSON-LD with address, phone, hours, and service area".
-   e) content_recommendations: 2 specific page or content additions that would most improve AEO visibility for this business at this URL. Be specific — name the page title and explain exactly what it should contain.
-   f) location_optimization_score: integer 1-10. How well the site likely targets ${hasLocation ? location : "its local market"} based on the business description. Deduct points for generic national content with no local signals.
-   g) location_optimization_notes: 1-2 sentences on what local AEO signals are likely missing.` : "";
+  // ── Website Quality Modifier context (from server-side fetch) ─────────────
+  let siteContext = "";
+  let wqmContext  = "";
+  if (hasWebsite) {
+    if (site?.fetch_success) {
+      const wqmLines: string[] = [];
+      if (site.ssl)                wqmLines.push("SSL/HTTPS active → +1 to Confidence on all keywords");
+      if (site.has_mobile_viewport) wqmLines.push("Mobile viewport tag found → +0.5 Ease on all keywords");
+      if (site.word_count > 800)   wqmLines.push(`Content depth ${site.word_count} words → +0.3 PC_avg`);
+      else if (site.word_count < 300) wqmLines.push(`Thin content ${site.word_count} words → -0.5 PC_avg`);
+      wqmContext = wqmLines.join("\n   ");
 
-  const websiteJsonField = hasWebsite ? `,
-  "website_analysis": {
-    "url": "${websiteUrl}",
-    "location": "${location || "not specified"}",
-    "aeo_readiness_score": 0,
-    "aeo_readiness_rationale": "...",
-    "missing_schema_types": ["...", "...", "..."],
-    "technical_aeo_gaps": [
-      {"gap": "...", "fix": "..."},
-      {"gap": "...", "fix": "..."},
-      {"gap": "...", "fix": "..."}
-    ],
-    "content_recommendations": [
-      {"title": "...", "why": "..."},
-      {"title": "...", "why": "..."}
-    ],
-    "location_optimization_score": 0,
-    "location_optimization_notes": "..."
-  }` : "";
+      siteContext = `
+--- FETCHED WEBSITE CONTENT (real data — use this for CCS and WQM) ---
+URL: ${websiteUrl}
+SSL: ${site.ssl ? "yes" : "no"}
+Mobile viewport: ${site.has_mobile_viewport ? "yes" : "no"}
+Estimated word count: ${site.word_count}
+Meta title: ${site.meta_title ?? "(not found)"}
+Meta description: ${site.meta_description ?? "(not found)"}
+H1 tags: ${site.h1s.length ? site.h1s.join(" | ") : "(none found)"}
+Page text excerpt (first 2000 chars):
+${site.body_excerpt}
+`;
+    } else {
+      siteContext = `
+--- WEBSITE NOTE ---
+URL provided: ${websiteUrl}
+Fetch result: ${site?.fetch_error ?? "could not retrieve"} — infer content from URL and business description.
+SSL: ${websiteUrl.startsWith("https://") ? "yes (HTTPS in URL)" : "no (HTTP)"}
+`;
+    }
+  }
 
-  return `You are an Answer Engine Optimization (AEO) expert. Your task is to produce a complete AEO audit and action plan for a given business. Follow ALL steps exactly. Output ONLY valid JSON. Do not include any explanatory text outside the JSON.
+  const competitorNum = parseInt(competitorCount, 10) || 3;
+  const isYMYL = /health|medical|finance|legal|law|insurance|pharmac/i.test(businessType + " " + businessDescription);
+  const ymylPenalty = isYMYL ? 2 : 0;
 
---- USER INPUT ---
-Business description: ${businessDescription}
-Business size: ${businessSize}
-Business type: ${businessType}
-Competitor density (1-5, optional): ${competitorDensity || "(infer from type and size)"}${hasWebsite ? `\nWebsite URL: ${websiteUrl}` : ""}${hasLocation ? `\nLocation / City: ${location}` : ""}${hasLocation ? `\n\nIMPORTANT: This business operates in ${location}. All keywords, prompts, and backlink sources MUST be targeted to this specific geographic market.` : ""}${hasWebsite ? `\nThe website is ${websiteUrl} — use this domain in example backlink anchors and prompt examples.` : ""}
+  return `You are an AEO (Answer Engine Optimization) audit expert performing a full v2 audit. Apply ALL logic rules exactly. Output ONLY valid JSON with no extra text.
 
---- RULES AND FORMULAS ---
+--- BUSINESS INPUT ---
+Description: ${businessDescription}
+Type: ${businessType}
+Size: ${businessSize}
+Competitor count: ${competitorNum}${hasLocation ? `\nLocation: ${location}` : ""}${hasWebsite ? `\nWebsite: ${websiteUrl}` : ""}
+${siteContext}
 
-STEP 1 - Generate 5 AEO keywords. For each: assign Impact (1-5), Confidence (1-5), Effort (1-5). Then:
-   Ease = 6 - Effort
-   Weighted ICE = (wI * Impact) + (wC * Confidence) + (wE * Ease)
-${hasLocation ? `   All keywords MUST include or imply "${location}" or a neighborhood within it.` : ""}
-   Weights by business type:
-   - local brick-and-mortar: wI=0.60, wC=0.25, wE=0.15
-   - B2B SaaS:               wI=0.55, wC=0.30, wE=0.15
-   - e-commerce:             wI=0.60, wC=0.20, wE=0.20
-   - healthcare/ymyl:        wI=0.40, wC=0.50, wE=0.10
-   - legal/financial:        wI=0.40, wC=0.50, wE=0.10
-   - news/media:             wI=0.50, wC=0.35, wE=0.15
-   - other:                  wI=0.50, wC=0.30, wE=0.20
+--- DERIVED VARIABLES (pre-calculated — use these values exactly) ---
+Local Advantage (LA): ${laValue}
+Rule applied: ${laRule}
+LA ease boost: ${laValue >= 0.5 ? "+0.5 to Ease for all geo-specific keywords" : "none"}
+Competitor count: ${competitorNum}
+YMYL penalty: ${ymylPenalty} (${isYMYL ? "YMYL business detected" : "not YMYL"})
+${wqmContext ? `Website Quality Modifier (WQM) signals:\n   ${wqmContext}` : ""}
 
-   Priority thresholds by size:
-   - small:      >=3.5 = high, >=2.5 = medium, else low
-   - medium:     >=4.0 = high, >=3.0 = medium, else low
-   - enterprise: >=4.25 = high, >=3.25 = medium, else low
+--- STEP-BY-STEP INSTRUCTIONS ---
 
-STEP 2 - Generate 1 example AEO prompt. Score with PEEM:
-   PC_avg = average of (Clarity, Linguistic Quality, Fairness) each 1-5
-   RC_avg = average of (Accuracy, Coherence, Relevance, Objectivity, Clarity, Conciseness) each 1-5
-   PQS = (PC_avg * 0.4) + (RC_avg * 0.6)
-   meets_threshold = PQS >= minimum (local=3.5, B2B SaaS/e-commerce=4.0, healthcare/legal=4.5, other/news=3.8)
-${hasWebsite ? `   The prompt should reference ${websiteUrl} or its services specifically.` : ""}
+STEP 1 — Generate 5–7 AEO keywords based on the business description${hasLocation ? ` and the location "${location}"` : ""}.
+For each keyword:
+  a) Assign Impact (1–5), Confidence (1–5), Ease (1–5).
+  b) If LA ≥ 0.5 AND the keyword targets a specific geography → ease_adj = Ease + 0.5, else ease_adj = Ease.
+${site?.fetch_success ? `  c) Check if the keyword (or a close synonym) appears in the fetched page content above. Set found_on_site = true/false.` : `  c) Set found_on_site = false (no website content available to check).`}
+  d) ICE = (Impact × 0.4) + (Confidence × 0.3) + (ease_adj × 0.3). Round to 2 decimals.
+  e) Priority: ICE ≥ 4.0 = high, ≥ 3.0 = medium, else low.
+${hasLocation ? `  All keywords MUST include or imply "${location}" or a specific neighborhood/district within it.` : ""}
 
-STEP 3 - Required AI searches:
-   Infer Competitor Density (1-5) if not provided:
-     local=3, B2B SaaS=3, e-commerce=3, healthcare/legal=3, news/media=3, other=3
-   YMYL Penalty = 2 if healthcare/ymyl or legal/financial, else 1
-   Local Advantage = 1 if local brick-and-mortar (assume not national), else 0
-   Total Prompts = (Competitor Density * 100) + (YMYL Penalty * 30) - (Local Advantage * 20)
-   Weekly Prompts = ceil(Total Prompts / 4) for small, /3 for medium, /2 for enterprise
+STEP 2 — Content Coverage Score (CCS).
+  keywords_found = count of keywords where found_on_site = true.
+  CCS = (keywords_found / total_keywords) × 100. Round to 1 decimal.
 
-STEP 4 - Backlink strategy (3 sources):
-   BQS = (Trust Flow * 0.4) + (Topical Relevance * 0.35) + (Placement Value * 0.25)
-   Sources by type: local=local news/chamber/vendor; B2B SaaS=comparison posts/G2/partners;
-   e-commerce=review blogs/affiliates/best-of; healthcare=.gov/.edu/associations;
-   legal=state bar/journals/.gov; news=social/aggregators/wire; other=forums/directories/guest posts
-${hasLocation ? `   Prefer backlink sources in or specifically covering ${location}.` : ""}${websiteAnalysisStep}
+STEP 3 — PQS (Prompt Quality Score).
+  Generate 1 example AEO prompt for this business${hasWebsite ? ` referencing ${websiteUrl}` : ""}.
+  PC_avg_base = average of (Clarity, Linguistic Quality, Fairness) each 1–5.
+  Apply WQM to PC_avg:${site?.fetch_success && site.word_count > 800 ? "\n    +0.3 (content depth > 800 words)" : ""}${site?.fetch_success && site.word_count < 300 ? "\n    -0.5 (thin content < 300 words)" : ""}${site?.fetch_success && site.ssl ? "\n    (SSL contributes to Confidence, not PC_avg)" : ""}
+  pc_avg_adjusted = PC_avg_base + WQM adjustments (clamp to 1–5).
+  RC_avg = average of (Accuracy, Coherence, Relevance, Objectivity, Clarity, Conciseness) each 1–5.
+  PQS = (pc_avg_adjusted × 0.4) + (RC_avg × 0.6). Round to 2 decimals.
+  meets_threshold: local service = 3.5, B2B SaaS/e-commerce = 4.0, healthcare/legal = 4.5, other = 3.8.
 
-STEP ${hasWebsite ? "6" : "5"} - Return ONLY this JSON (no extra text, no markdown):
+STEP 4 — Prompt Volume Target.
+  base = (${competitorNum} × 100) + (${ymylPenalty} × 30) - (${laValue} × 20)
+  total_prompts = base  (this is the monthly total)
+  weekly_prompts = ceil(base / 4)
+  Populate both fields and show the full arithmetic in formula_used.
+
+STEP 5 — AEO Readiness Score (ARS).
+  avg_ice = average ICE across all keywords (use adjusted ICE).
+  normalized_ice = (avg_ice / 5) × 100
+  normalized_pqs = (PQS / 5) × 100
+  ARS = (CCS × 0.3) + (normalized_ice × 0.4) + (normalized_pqs × 0.2) + (${laValue} × 10)
+  Round ARS to 1 decimal.
+  ars_status: ARS ≥ 80 = "Green", ARS ≥ 60 = "Amber", else "Red".
+  Show every step of the ARS calculation.
+
+STEP 6 — Executive Summary.
+  Write 3–4 plain-English sentences for the business owner explaining: overall AEO health (ARS + status), the most critical gap, and the top immediate action to take.
+
+STEP 7 — Website Analysis (REQUIRED — write real sentences, do NOT copy this instruction).
+  ${site?.fetch_success
+    ? `You fetched the website. Analyze the actual content above.`
+    : hasWebsite
+      ? `No fetch succeeded. Infer from the URL "${websiteUrl}" and the business description.`
+      : `No URL was provided. Infer entirely from the business description and business type.`}
+  Write 3–4 plain-English sentences covering:
+  a) What the website/web presence likely looks like and what content it probably has or lacks.
+  b) Its AEO positioning — strong, average, or thin — with specific evidence or reasoned inference.
+  c) The single most impactful AEO improvement available right now.
+  Put this in website_analysis.overview in the JSON.
+
+STEP 8 — Location & Market Overview (REQUIRED — write real sentences, do NOT copy this instruction).
+  ${hasLocation
+    ? `Location provided: "${location}". Analyze this specific market.`
+    : `No location provided. Cover general market dynamics for this business type.`}
+  Write 3–4 plain-English sentences covering:
+  ${hasLocation
+    ? `a) The local market in "${location}" — competition level, demand, underserved niches.\n  b) What questions people in ${location} ask AI engines about this type of business.\n  c) The single biggest local AEO opportunity being missed.`
+    : `a) Typical geographic market dynamics (local vs regional vs national) for this business type.\n  b) What questions people commonly ask AI engines about this type of business.\n  c) How providing a city/location would unlock more targeted AEO opportunities.`}
+  Put this in location_analysis.market_overview in the JSON.
+
+STEP 9 — Prioritized Recommendations.
+  Generate 4–6 actionable recommendations ranked by impact/effort. Each has: priority (1 = highest), action (what to do), impact ("high"/"medium"/"low"), effort ("low"/"medium"/"high"), rationale (1 sentence why).
+
+FINAL STEP — Return ONLY this JSON (no markdown, no extra text):
 {
-  "business_type": "...",
-  "business_size": "...",
+  "executive_summary": {
+    "ars": 0.0,
+    "ars_status": "Green|Amber|Red",
+    "ars_calculation": "",
+    "summary": ""
+  },
+  "local_advantage": {
+    "la_value": ${laValue},
+    "rule_applied": "${laRule}",
+    "ease_boost_applied": ${laValue >= 0.5},
+    "summary": ""
+  },
   "keywords": [
-    {"keyword": "...", "impact": 0, "confidence": 0, "effort": 0, "weighted_ice": 0.00, "priority": "high|medium|low"}
+    {
+      "keyword": "...",
+      "impact": 0, "confidence": 0, "ease": 0, "ease_adj": 0.0,
+      "ice": 0.00,
+      "found_on_site": false,
+      "priority": "high|medium|low"
+    }
   ],
-  "example_prompt": {
-    "text": "...",
-    "pqs_score": 0.00,
-    "pc_avg": 0.00,
+  "content_coverage": {
+    "ccs": 0.0,
+    "keywords_found": 0,
+    "keywords_total": 0,
+    "found_keywords": [],
+    "missing_keywords": []
+  },
+  "website_analysis": {
+    "url": "${websiteUrl ?? ""}",
+    "ssl": ${site?.ssl ?? websiteUrl?.startsWith("https://") ?? false},
+    "mobile_responsive": ${site?.has_mobile_viewport ?? false},
+    "word_count": ${site?.word_count ?? 0},
+    "meta_title": ${site?.meta_title ? `"${site.meta_title.replace(/"/g, '\\"')}"` : "null"},
+    "meta_description": ${site?.meta_description ? `"${site.meta_description.replace(/"/g, '\\"').slice(0, 200)}"` : "null"},
+    "h1s": ${JSON.stringify(site?.h1s ?? [])},
+    "wqm_adjustments": [],
+    "wqm_pc_adj": 0.0,
+    "overview": ""
+  },
+  "pqs": {
+    "pc_avg_base": 0.00,
+    "pc_avg_adjusted": 0.00,
     "rc_avg": 0.00,
-    "meets_threshold": true
+    "pqs_score": 0.00,
+    "meets_threshold": true,
+    "example_prompt": "the example AEO prompt text"
   },
   "required_searches": {
+    "competitor_count": ${competitorNum},
+    "ymyl_penalty": ${ymylPenalty},
+    "la_value": ${laValue},
     "total_prompts": 0,
     "weekly_prompts": 0,
-    "formula_used": "show the exact calculation"
+    "formula_used": "show each step: base = (CompetitorCount×100 + YMYL×30 - LA×20), total_prompts = base, weekly_prompts = ceil(base / 4)"
   },
-  "backlink_strategy": [
-    {"source_type": "...", "clickable": true, "estimated_bqs": 0.00, "reasoning": "..."}
+  "location_analysis": {
+    "location": "${location ?? ""}",
+    "market_overview": "",
+    "local_aeo_opportunities": [],
+    "location_optimization_score": 0
+  },
+  "recommendations": [
+    {"priority": 1, "action": "...", "impact": "high", "effort": "low", "rationale": "..."}
   ],
-  "disclaimer": "For YMYL industries, consult compliance before implementation."${websiteJsonField}
+  "disclaimer": "Scores are inferred from business description and available site data. Verify with live analytics before making major decisions."
 }`;
 }
 
@@ -594,7 +752,13 @@ router.post("/openai/business-audit", async (req, res) => {
 
   const businessDescription = `${businessName}: ${description}`;
 
-  // 1. Try the Python AEO service first (gives Langfuse tracing)
+  // 1. Fetch website content (parallel with nothing — runs before LLM call)
+  let site: FetchedSite | undefined;
+  if (websiteUrl) {
+    site = await fetchWebsiteContent(websiteUrl);
+  }
+
+  // 2. Try the Python AEO service first (gives Langfuse tracing)
   try {
     const aeoRes = await fetch(`${AEO_LLM_URL}/audit-business`, {
       method: "POST",
@@ -620,16 +784,16 @@ router.post("/openai/business-audit", async (req, res) => {
     // Python service unavailable — fall through to direct LLM call
   }
 
-  // 2. Direct LLM fallback
+  // 3. Direct LLM fallback (v2 prompt with fetched site content)
   try {
-    const prompt = buildAuditPrompt(businessDescription, businessSize, businessType, competitorDensity, websiteUrl, location);
+    const prompt = buildAuditPrompt(businessDescription, businessSize, businessType, competitorDensity, websiteUrl, location, site);
     const startTime = Date.now();
 
     const completion = await createCompletion({
       model: CHAT_MODEL,
-      max_tokens: 3000,
+      max_tokens: 4500,
       messages: [
-        { role: "system", content: "You are a senior AEO strategist. Return only valid JSON, no markdown." },
+        { role: "system", content: "You are a senior AEO strategist running a v2 audit. Apply every formula step-by-step and return only valid JSON." },
         { role: "user",   content: prompt },
       ],
     });
@@ -644,12 +808,12 @@ router.post("/openai/business-audit", async (req, res) => {
 
     const traceUrl = await recordTrace({
       name: "business-audit",
-      input: { businessDescription, businessSize, businessType, competitorDensity },
+      input: { businessDescription, businessSize, businessType, competitorDensity, websiteUrl, location },
       output: data,
       model: completion._model_used ?? CHAT_MODEL,
       messages: [
-        { role: "system", content: "You are a senior AEO strategist. Return only valid JSON, no markdown." },
-        { role: "user",   content: buildAuditPrompt(businessDescription, businessSize, businessType, competitorDensity, websiteUrl, location) },
+        { role: "system", content: "You are a senior AEO strategist running a v2 audit. Apply every formula step-by-step and return only valid JSON." },
+        { role: "user",   content: prompt },
       ],
       responseContent: completion.choices[0]?.message?.content ?? "",
       usage: completion.usage,
