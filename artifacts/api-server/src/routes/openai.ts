@@ -1627,4 +1627,133 @@ router.post("/openai/keyword-generator", async (req, res) => {
   }
 });
 
+// ── AEO Keyword Strategy ──────────────────────────────────────────────────────
+
+function buildAEOKeywordStrategyPrompt(cities: string[], categories: string[]): string {
+  const totalSets = cities.length * categories.length;
+  const kwPerType = totalSets <= 9 ? 5 : totalSets <= 30 ? 3 : 2;
+  const nearMeCount = totalSets <= 9 ? 3 : 2;
+
+  return `You are a senior AEO (Answer Engine Optimization) strategist. AEO targets AI-generated answers in ChatGPT, Perplexity, Google AI Overviews, Claude, Gemini — NOT traditional Google blue links.
+
+Cities: ${cities.join(", ")}
+Business categories: ${categories.join(", ")}
+
+TASK: Generate a complete AEO keyword strategy. Return ONLY valid JSON, no markdown.
+
+For each city produce:
+- City profile with 5 local target areas (neighborhoods/districts)
+- For EACH category × city combination: ${kwPerType} big-city keywords, ${kwPerType} local (neighborhood) keywords, ${nearMeCount} "near me" keywords
+- Each keyword needs: keyword text, location, volume (High/Medium/Low), competition (Very High/High/Medium/Low), intent (Transactional/Commercial/Informational), conversion (High/Medium/Low), aeo_angle (1 sentence on how it gets into AI answers), explanation (1 sentence strategic rationale)
+- A strategic explanation section covering big city rationale, local rationale, combined approach, content strategy, and 5 AEO-specific tips
+
+AEO keyword rules:
+- Big city: "[Service] [City]" — e.g. "emergency plumber New York"
+- Local: "[Service] [Neighborhood]" — e.g. "plumber Upper East Side"
+- Near me: "[Service] near me" variants — highest intent, triggers AI local results
+- Phrase keywords as what a person would TYPE or SPEAK into an AI engine
+- "aeo_angle" explains HOW this keyword gets the business into an AI-generated answer
+
+Return this JSON structure exactly:
+{
+  "cities": [
+    {
+      "name": "",
+      "population": "",
+      "metro_population": "",
+      "aeo_potential": "Very High|High|Medium",
+      "classification": "",
+      "key_industries": [],
+      "local_areas": [
+        { "name": "", "population": "", "zip_codes": [], "why_target": "" }
+      ]
+    }
+  ],
+  "keywords": [
+    {
+      "category": "",
+      "city": "",
+      "items": [
+        {
+          "type": "big_city|local|near_me",
+          "keyword": "",
+          "location": "",
+          "volume": "",
+          "competition": "",
+          "intent": "",
+          "conversion": "",
+          "aeo_angle": "",
+          "explanation": ""
+        }
+      ]
+    }
+  ],
+  "strategy": {
+    "big_city_rationale": "",
+    "local_rationale": "",
+    "combined_approach": "",
+    "content_strategy": "",
+    "aeo_tips": []
+  }
+}`;
+}
+
+router.post("/openai/aeo-keyword-strategy", async (req, res) => {
+  const cities: string[] = Array.isArray(req.body?.cities) && req.body.cities.length > 0
+    ? (req.body.cities as string[]).slice(0, 10)
+    : ["New York", "Los Angeles", "Chicago"];
+  const categories: string[] = Array.isArray(req.body?.categories) && req.body.categories.length > 0
+    ? (req.body.categories as string[]).slice(0, 10)
+    : ["Home Services"];
+
+  try {
+    const prompt = buildAEOKeywordStrategyPrompt(cities, categories);
+    const startTime = Date.now();
+
+    const completion = await createCompletion({
+      model: CHAT_MODEL,
+      max_tokens: 8000,
+      messages: [
+        { role: "system", content: "You are a senior AEO strategist. AEO = Answer Engine Optimization for AI search (ChatGPT, Perplexity, Google AI Overviews, Claude, Gemini). Return ONLY valid JSON." },
+        { role: "user",   content: prompt },
+      ],
+    });
+
+    let data: unknown;
+    try {
+      data = extractJson(completion.choices[0]?.message?.content ?? "");
+    } catch {
+      res.status(502).json({ error: "LLM returned non-JSON response" });
+      return;
+    }
+
+    const traceUrl = await recordTrace({
+      name: "aeo-keyword-strategy",
+      input: { cities, categories },
+      output: data,
+      model: completion._model_used ?? CHAT_MODEL,
+      messages: [
+        { role: "system", content: "AEO keyword strategy generator" },
+        { role: "user",   content: prompt },
+      ],
+      responseContent: completion.choices[0]?.message?.content ?? "",
+      usage: completion.usage,
+      startTime,
+    });
+
+    await db.insert(backendLogs).values({
+      event: "aeo-keyword-strategy",
+      model: CHAT_MODEL,
+      tokensUsed: completion.usage?.total_tokens ?? null,
+      responseTimeMs: Date.now() - startTime,
+      status: "success",
+      details: traceUrl,
+    });
+
+    res.json({ ...(data as object), tokens_used: completion.usage?.total_tokens ?? 0, trace_url: traceUrl });
+  } catch (err) {
+    res.status(502).json({ error: err instanceof Error ? err.message : "AEO keyword strategy failed" });
+  }
+});
+
 export default router;

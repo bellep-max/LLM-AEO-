@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { MessageSquare, LayoutDashboard, Terminal, ExternalLink, Trash2, BarChart2, Activity, Calendar, Archive, Loader2, Sparkles } from "lucide-react";
+import { MessageSquare, LayoutDashboard, Terminal, ExternalLink, Trash2, BarChart2, Activity, Calendar, Archive, Loader2, Sparkles, Globe } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useHistory } from "@/contexts/history-context";
 import { useGlobalChat } from "@/hooks/use-global-chat";
@@ -27,6 +27,7 @@ export function Layout({ children }: LayoutProps) {
     { href: "/health-monitor", label: "Health Monitor", icon: Activity },
     { href: "/daily-overview", label: "Daily Overview", icon: Calendar },
     { href: "/keyword-generator", label: "Keyword Generator", icon: Sparkles },
+    { href: "/aeo-keyword-strategy", label: "AEO City Strategy", icon: Globe },
     { href: "/backend", label: "Backend Logs", icon: Terminal },
     { href: "/archive", label: "Archive", icon: Archive },
   ];
