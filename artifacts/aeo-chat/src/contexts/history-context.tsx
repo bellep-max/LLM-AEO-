@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback } from "react";
 
-export type HistoryEntryType = "Business Analyzer" | "Full AEO Audit" | "AEO Chat";
+export type HistoryEntryType = "Business Analyzer" | "Full AEO Audit" | "Backlinks" | "AEO Chat";
 
 export type HistoryEntry = {
   id: string;

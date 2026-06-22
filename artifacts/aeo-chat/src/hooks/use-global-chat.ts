@@ -6,10 +6,28 @@ export interface GlobalChatMsg {
   traceUrl?: string | null;
 }
 
+const CHAT_STORAGE_KEY = "signal-aeo-chat-messages";
+const BIZNAME_STORAGE_KEY = "signal-aeo-chat-bizname";
+
+function loadMessages(): GlobalChatMsg[] {
+  try {
+    const raw = localStorage.getItem(CHAT_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as GlobalChatMsg[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveMessages(msgs: GlobalChatMsg[]) {
+  try {
+    localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(msgs));
+  } catch {}
+}
+
 // ── Module-level state — survives component unmounts and route changes ──────────
-let _messages: GlobalChatMsg[] = [];
+let _messages: GlobalChatMsg[] = loadMessages();
 let _loading  = false;
-let _bizName  = "";
+let _bizName  = (() => { try { return localStorage.getItem(BIZNAME_STORAGE_KEY) ?? ""; } catch { return ""; } })();
 
 const _stateListeners      = new Set<() => void>();
 const _completionListeners = new Set<(msg: GlobalChatMsg, bizName: string) => void>();
@@ -22,9 +40,9 @@ async function _send(text: string) {
 
   _messages = [..._messages, { role: "user", content: trimmed }];
   _loading  = true;
+  saveMessages(_messages);
   _notify();
 
-  // Snapshot messages at call time so concurrent updates don't corrupt context
   const snapshot = _messages;
 
   try {
@@ -51,19 +69,21 @@ async function _send(text: string) {
 
     const assistantMsg: GlobalChatMsg = { role: "assistant", content, traceUrl: d.traceUrl ?? null };
     _messages = [..._messages, assistantMsg];
+    saveMessages(_messages);
 
     if (res.ok) {
       _completionListeners.forEach(fn => fn(assistantMsg, _bizName));
     }
   } catch (e: unknown) {
-    const msg   = e instanceof Error ? e.message : String(e);
-    const isTO  = msg.toLowerCase().includes("timeout") || msg.toLowerCase().includes("abort");
-    _messages   = [..._messages, {
+    const msg  = e instanceof Error ? e.message : String(e);
+    const isTO = msg.toLowerCase().includes("timeout") || msg.toLowerCase().includes("abort");
+    _messages  = [..._messages, {
       role: "assistant",
       content: isTO
         ? "Request timed out (120 s). The LLM may be under load — please try again."
         : `Could not reach the AI service: ${msg}`,
     }];
+    saveMessages(_messages);
   } finally {
     _loading = false;
     _notify();
@@ -83,9 +103,19 @@ export function useGlobalChat() {
     messages:   _messages,
     loading:    _loading,
     bizName:    _bizName,
-    setBizName: (name: string) => { _bizName = name; _notify(); },
-    send:       _send,
-    clear:      () => { _messages = []; _notify(); },
+    setBizName: (name: string) => {
+      _bizName = name;
+      try { localStorage.setItem(BIZNAME_STORAGE_KEY, name); } catch {}
+      _notify();
+    },
+    send:  _send,
+    clear: () => {
+      _messages = [];
+      _bizName  = "";
+      saveMessages([]);
+      try { localStorage.removeItem(BIZNAME_STORAGE_KEY); } catch {}
+      _notify();
+    },
   };
 }
 

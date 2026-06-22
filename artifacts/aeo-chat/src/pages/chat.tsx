@@ -334,6 +334,11 @@ export function ChatPage() {
     } else if (selectedEntry.type === "Full AEO Audit") {
       setAuditResult(selectedEntry.result as BusinessAuditResult);
       setActiveView("analysis");
+    } else if (selectedEntry.type === "Backlinks") {
+      setBacklinksResult(selectedEntry.result as BacklinksResult);
+      setActiveView("backlinks");
+    } else if (selectedEntry.type === "AEO Chat") {
+      setActiveView("chat");
     }
     selectEntry(null); // consume so re-selecting same entry works again
   }, [selectedEntry]);
@@ -643,6 +648,12 @@ export function ChatPage() {
       const payload = await res.json();
       if (!res.ok) throw new Error(payload.error || "Backlinks generation failed");
       setBacklinksResult(payload as BacklinksResult);
+      addEntry({
+        type: "Backlinks",
+        businessName: blKeyword.trim(),
+        traceUrl: (payload as BacklinksResult).trace_url ?? null,
+        result: payload,
+      });
     } catch (err) {
       setBacklinksError(err instanceof Error ? err.message : "Failed to generate backlinks");
       setBacklinksResult(null);
