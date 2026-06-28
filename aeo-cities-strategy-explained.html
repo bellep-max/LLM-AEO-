@@ -1,0 +1,977 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AEO Cities Strategy — Signal AEO Platform</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --primary:   #6d28d9;
+      --primary-lt:#ede9fe;
+      --emerald:   #059669;
+      --emerald-lt:#d1fae5;
+      --amber:     #d97706;
+      --amber-lt:  #fef3c7;
+      --rose:      #e11d48;
+      --rose-lt:   #ffe4e6;
+      --blue:      #2563eb;
+      --blue-lt:   #dbeafe;
+      --slate:     #475569;
+      --border:    #e2e8f0;
+      --bg:        #f8fafc;
+      --card:      #ffffff;
+      --text:      #0f172a;
+      --muted:     #64748b;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+      font-size: 15px;
+    }
+
+    /* ── HEADER ── */
+    .hero {
+      background: linear-gradient(135deg, #1e1b4b 0%, #4c1d95 50%, #6d28d9 100%);
+      color: #fff;
+      padding: 64px 40px 56px;
+      text-align: center;
+    }
+    .hero .tag {
+      display: inline-block;
+      background: rgba(255,255,255,.15);
+      border: 1px solid rgba(255,255,255,.25);
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      padding: 4px 14px;
+      margin-bottom: 20px;
+    }
+    .hero h1 {
+      font-size: clamp(28px, 5vw, 48px);
+      font-weight: 900;
+      letter-spacing: -.02em;
+      margin-bottom: 16px;
+    }
+    .hero p {
+      font-size: 17px;
+      opacity: .85;
+      max-width: 680px;
+      margin: 0 auto;
+    }
+    .hero .engines {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 32px;
+    }
+    .hero .engine-pill {
+      background: rgba(255,255,255,.12);
+      border: 1px solid rgba(255,255,255,.2);
+      border-radius: 8px;
+      padding: 6px 16px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    /* ── LAYOUT ── */
+    .container { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+    .section { padding: 56px 0; }
+    .section + .section { border-top: 1px solid var(--border); }
+
+    h2 {
+      font-size: 26px;
+      font-weight: 800;
+      letter-spacing: -.02em;
+      margin-bottom: 8px;
+    }
+    h3 {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 10px;
+    }
+    h4 {
+      font-size: 14px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--muted);
+      margin-bottom: 12px;
+    }
+    .section-intro {
+      font-size: 16px;
+      color: var(--muted);
+      max-width: 720px;
+      margin-bottom: 36px;
+    }
+
+    /* ── CARDS ── */
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 28px;
+    }
+    .card-grid {
+      display: grid;
+      gap: 20px;
+    }
+    .card-grid-2 { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+    .card-grid-3 { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+
+    /* ── BADGES ── */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      border: 1px solid;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 10px;
+      white-space: nowrap;
+    }
+    .badge-purple  { background: var(--primary-lt);  color: var(--primary);  border-color: #c4b5fd; }
+    .badge-green   { background: var(--emerald-lt);  color: var(--emerald);  border-color: #6ee7b7; }
+    .badge-amber   { background: var(--amber-lt);    color: var(--amber);    border-color: #fcd34d; }
+    .badge-rose    { background: var(--rose-lt);     color: var(--rose);     border-color: #fda4af; }
+    .badge-blue    { background: var(--blue-lt);     color: var(--blue);     border-color: #93c5fd; }
+    .badge-slate   { background: #f1f5f9;            color: var(--slate);    border-color: var(--border); }
+
+    /* ── TABLE ── */
+    .table-wrap { overflow-x: auto; border-radius: 12px; border: 1px solid var(--border); }
+    table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+    thead tr { background: #f8fafc; }
+    th {
+      padding: 10px 14px;
+      text-align: left;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    td { padding: 11px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #f8fafc; }
+    .kw { font-weight: 700; color: var(--text); font-family: monospace; font-size: 13px; }
+
+    /* ── DIVIDER ── */
+    .pill-divider {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin: 40px 0;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+    .pill-divider::before, .pill-divider::after {
+      content: "";
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    /* ── KEYWORD TYPE BLOCKS ── */
+    .kw-type {
+      border-radius: 14px;
+      padding: 28px;
+      margin-bottom: 20px;
+    }
+    .kw-type.big-city { border: 2px solid #bfdbfe; background: #eff6ff; }
+    .kw-type.local    { border: 2px solid #a7f3d0; background: #f0fdf4; }
+    .kw-type.near-me  { border: 2px solid #fde68a; background: #fffbeb; }
+
+    .kw-type h3 { margin-bottom: 6px; }
+    .kw-type .subtitle { font-size: 13px; color: var(--muted); margin-bottom: 16px; }
+
+    .kw-example {
+      display: inline-block;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-family: monospace;
+      font-size: 13px;
+      font-weight: 700;
+      padding: 5px 12px;
+      margin: 3px 4px 3px 0;
+    }
+
+    /* ── STEP LIST ── */
+    .steps { counter-reset: step; }
+    .step {
+      display: flex;
+      gap: 18px;
+      margin-bottom: 24px;
+      counter-increment: step;
+    }
+    .step-num {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: var(--primary);
+      color: #fff;
+      font-weight: 900;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+    .step-body h3 { margin-bottom: 4px; font-size: 16px; }
+    .step-body p { color: var(--muted); font-size: 14px; }
+
+    /* ── CITY GRID ── */
+    .city-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 10px;
+    }
+    .city-pill {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 16px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .city-pill .pop { font-size: 11px; color: var(--muted); font-weight: 400; margin-top: 2px; }
+    .city-pill.tier1 { border-color: #c4b5fd; background: #f5f3ff; }
+    .city-pill.tier2 { border-color: #bfdbfe; background: #eff6ff; }
+
+    /* ── METRIC BOXES ── */
+    .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 32px; }
+    .metric {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      text-align: center;
+    }
+    .metric .num { font-size: 36px; font-weight: 900; line-height: 1; color: var(--primary); }
+    .metric .lbl { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-top: 6px; }
+
+    /* ── AEO VS SEO ── */
+    .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    .compare-col { border-radius: 14px; padding: 24px; }
+    .compare-col.seo { background: #f1f5f9; border: 1px solid var(--border); }
+    .compare-col.aeo { background: #f5f3ff; border: 2px solid #c4b5fd; }
+    .compare-col h3 { margin-bottom: 14px; }
+    .compare-col ul { list-style: none; }
+    .compare-col ul li { padding: 5px 0; font-size: 14px; color: var(--muted); }
+    .compare-col ul li::before { content: "→ "; font-weight: 700; }
+    .compare-col.aeo ul li { color: var(--text); }
+    .compare-col.aeo ul li::before { color: var(--primary); }
+
+    /* ── FORMULA ── */
+    .formula-box {
+      background: #1e1b4b;
+      color: #e9d5ff;
+      border-radius: 12px;
+      padding: 20px 24px;
+      font-family: monospace;
+      font-size: 14px;
+      line-height: 1.8;
+      margin: 20px 0;
+    }
+    .formula-box .comment { color: #7c3aed; }
+
+    /* ── QUOTE ── */
+    .callout {
+      border-left: 4px solid var(--primary);
+      background: var(--primary-lt);
+      border-radius: 0 12px 12px 0;
+      padding: 16px 20px;
+      margin: 24px 0;
+      font-size: 14px;
+      color: var(--slate);
+    }
+    .callout strong { color: var(--primary); }
+
+    /* ── FOOTER ── */
+    footer {
+      background: #1e1b4b;
+      color: rgba(255,255,255,.6);
+      text-align: center;
+      padding: 32px 24px;
+      font-size: 13px;
+    }
+    footer strong { color: #fff; }
+
+    @media (max-width: 640px) {
+      .compare { grid-template-columns: 1fr; }
+      .hero { padding: 40px 20px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════ HERO -->
+<div class="hero">
+  <div class="tag">Signal AEO Platform</div>
+  <h1>AEO Cities Strategy</h1>
+  <p>A complete explanation of how we generate Answer Engine Optimization keyword strategies for local businesses across 25 major US cities — and why it works.</p>
+  <div class="engines">
+    <div class="engine-pill">ChatGPT</div>
+    <div class="engine-pill">Perplexity</div>
+    <div class="engine-pill">Google AI Overviews</div>
+    <div class="engine-pill">Claude</div>
+    <div class="engine-pill">Gemini</div>
+    <div class="engine-pill">Bing Copilot</div>
+  </div>
+</div>
+
+<div class="container">
+
+<!-- ═══════════════════════════════════════════════════ WHAT IS AEO -->
+<div class="section">
+  <h2>What Is AEO — and Why It's Different from SEO</h2>
+  <p class="section-intro">Search Engine Optimization (SEO) targets Google's blue link results. Answer Engine Optimization (AEO) targets something newer and more powerful: the AI-generated answers that appear before any blue links — or replace them entirely.</p>
+
+  <div class="compare">
+    <div class="compare-col seo">
+      <h3>Traditional SEO</h3>
+      <ul>
+        <li>Targets Google's 10 blue links</li>
+        <li>User clicks through to your website</li>
+        <li>Keyword stuffing, backlinks, domain authority</li>
+        <li>Optimise for crawlers and indexers</li>
+        <li>Position 1–3 gets ~70% of clicks</li>
+        <li>Months to see ranking changes</li>
+        <li>Mostly text-typed desktop searches</li>
+      </ul>
+    </div>
+    <div class="compare-col aeo">
+      <h3>AEO — Answer Engine Optimization</h3>
+      <ul>
+        <li>Targets the AI answer box above all links</li>
+        <li>AI cites YOUR business as the answer</li>
+        <li>Optimise for question-answer relevance + authority signals</li>
+        <li>Write content that directly answers real questions</li>
+        <li>One citation = massive visibility across millions of users</li>
+        <li>Faster to influence — AI re-trains on fresh content</li>
+        <li>Voice, mobile, and conversational queries dominate</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="callout">
+    <strong>The shift happening right now:</strong> When someone asks ChatGPT "Who is the best plumber in Brooklyn?" or Perplexity "Which HVAC company near me is reliable?", they expect an answer — not a list of links to scroll through. AEO is about making sure YOUR business is the answer.
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════ THE PLATFORM TOOL -->
+<div class="section">
+  <h2>Our AEO Cities Strategy Tool — What It Does</h2>
+  <p class="section-intro">The tool inside the Signal AEO Platform generates a complete, AI-powered keyword strategy for any combination of US cities and business categories. Here's exactly what it produces.</p>
+
+  <div class="metrics">
+    <div class="metric"><div class="num">25</div><div class="lbl">US Cities</div></div>
+    <div class="metric"><div class="num">10</div><div class="lbl">Business Categories</div></div>
+    <div class="metric"><div class="num">3</div><div class="lbl">Keyword Types</div></div>
+    <div class="metric"><div class="num">6–8</div><div class="lbl">Local Areas Per City</div></div>
+    <div class="metric"><div class="num">330+</div><div class="lbl">AEO Keywords Generated</div></div>
+  </div>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <h3>You Select Cities and Business Categories</h3>
+        <p>From 25 major US cities and 10 business categories, you choose which combinations to generate keywords for. You can select 1 city or all 25. You can pick 1 category or all 10. The tool scales intelligently — selecting more cities/categories gives you more keywords per set, fewer gives richer detail per keyword.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <h3>The AI Profiles Each City</h3>
+        <p>For each selected city, the AI produces a full profile: population, metro population, AEO potential rating (Very High / High / Medium), key industries, and a classification explaining why this city matters for AEO. It then identifies 6–8 local target areas within that city — specific neighborhoods, boroughs, or ZIP zones that have their own distinct identity and search behaviour.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <h3>Keywords Are Generated in 3 Strategic Tiers</h3>
+        <p>For every city × category combination, the AI generates three types of keywords — each with a different purpose, competition level, and AEO angle. Every keyword comes with Volume, Competition, Intent, and Conversion ratings, plus a specific explanation of HOW it gets a business into an AI-generated answer.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">4</div>
+      <div class="step-body">
+        <h3>A Strategic Roadmap Is Produced</h3>
+        <p>Beyond keywords, the tool generates a full AEO strategy: why to use big city keywords, why local keywords convert better, how to use both together, a content strategy (which pages to build and in what order), and 5 AEO-specific tips for getting cited in AI answers.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════ THE 25 CITIES -->
+<div class="section">
+  <h2>The 25 US Cities — Why We Chose These</h2>
+  <p class="section-intro">We cover 25 cities across two tiers. Tier 1 is the top 10 by raw population. Tier 2 adds major economic and cultural hubs that drive disproportionate AI search volume — cities where high-income, tech-forward populations are most likely to use AI engines for local business discovery.</p>
+
+  <h4>Tier 1 — Top 10 by Population</h4>
+  <div class="city-grid" style="margin-bottom: 24px;">
+    <div class="city-pill tier1">New York<div class="pop">8.3M city · 20M metro</div></div>
+    <div class="city-pill tier1">Los Angeles<div class="pop">3.9M city · 13M metro</div></div>
+    <div class="city-pill tier1">Chicago<div class="pop">2.6M city · 9.5M metro</div></div>
+    <div class="city-pill tier1">Houston<div class="pop">2.3M city · 7.3M metro</div></div>
+    <div class="city-pill tier1">Phoenix<div class="pop">1.6M city · 5M metro</div></div>
+    <div class="city-pill tier1">Philadelphia<div class="pop">1.5M city · 6M metro</div></div>
+    <div class="city-pill tier1">San Antonio<div class="pop">1.4M city · 2.5M metro</div></div>
+    <div class="city-pill tier1">San Diego<div class="pop">1.4M city · 3.3M metro</div></div>
+    <div class="city-pill tier1">Dallas<div class="pop">1.3M city · 7.6M metro</div></div>
+    <div class="city-pill tier1">San Jose<div class="pop">1M city · 2M metro</div></div>
+  </div>
+
+  <h4>Tier 2 — Major Economic &amp; Cultural Hubs</h4>
+  <div class="city-grid">
+    <div class="city-pill tier2">Miami<div class="pop">Tourism + Finance + Latin America hub</div></div>
+    <div class="city-pill tier2">Atlanta<div class="pop">Southeast business capital</div></div>
+    <div class="city-pill tier2">Seattle<div class="pop">Tech + Aerospace + Amazon HQ</div></div>
+    <div class="city-pill tier2">Boston<div class="pop">Healthcare + Education + Biotech</div></div>
+    <div class="city-pill tier2">Denver<div class="pop">Fast-growing Mountain West hub</div></div>
+    <div class="city-pill tier2">Las Vegas<div class="pop">Hospitality + Entertainment capital</div></div>
+    <div class="city-pill tier2">Portland<div class="pop">Pacific NW retail + food culture</div></div>
+    <div class="city-pill tier2">Nashville<div class="pop">Healthcare + Music + fast growth</div></div>
+    <div class="city-pill tier2">Austin<div class="pop">Tech boom + SXSW + VC capital</div></div>
+    <div class="city-pill tier2">Charlotte<div class="pop">Banking + finance capital of SE</div></div>
+    <div class="city-pill tier2">Minneapolis<div class="pop">Healthcare + retail + Fortune 500s</div></div>
+    <div class="city-pill tier2">Tampa<div class="pop">Fast-growing Gulf Coast market</div></div>
+    <div class="city-pill tier2">New Orleans<div class="pop">Unique culture + tourism + food</div></div>
+    <div class="city-pill tier2">Washington DC<div class="pop">Government + lobbying + defense</div></div>
+    <div class="city-pill tier2">San Francisco<div class="pop">VC + Tech + Startup ecosystem</div></div>
+  </div>
+
+  <div class="callout" style="margin-top: 28px;">
+    <strong>Why not just the 10 biggest cities?</strong> Population size ≠ AEO opportunity. A city like Austin or Nashville has a younger, more tech-savvy population that overwhelmingly uses AI engines for local discovery. San Francisco has the highest density of AI engine power users in the country. These Tier 2 cities often have better AEO ROI than their population suggests.
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════ LOCAL AREAS -->
+<div class="section">
+  <h2>Why Local Areas Matter — The Neighbourhood Strategy</h2>
+  <p class="section-intro">For each city, we drill down to 6–8 specific neighbourhoods, boroughs, or districts. This is where the real AEO opportunity is. Here's why local areas outperform city-wide targeting for most small businesses.</p>
+
+  <div class="card-grid card-grid-2" style="margin-bottom: 32px;">
+    <div class="card">
+      <h3>🏙️ City-Wide Targeting</h3>
+      <p style="color: var(--muted); font-size: 14px; margin-top: 8px;">
+        "Best plumber in New York" — 8.3 million people live here. Hundreds of plumbing companies compete for this query. AI engines can only cite 1–3 businesses in their answer. Very high competition, expensive to win, slow to move.
+      </p>
+    </div>
+    <div class="card" style="border-color: #a7f3d0; background: #f0fdf4;">
+      <h3>📍 Neighbourhood Targeting</h3>
+      <p style="color: var(--muted); font-size: 14px; margin-top: 8px;">
+        "Best plumber in Brooklyn Heights" — a specific, recognisable neighbourhood. Fewer competitors (most plumbers don't optimise at this level). AI engines love hyper-local answers because they feel more useful and trustworthy to the person asking.
+      </p>
+    </div>
+  </div>
+
+  <h4>Example: New York City — Local Areas We Target</h4>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Neighbourhood</th>
+          <th>Population</th>
+          <th>ZIP Codes</th>
+          <th>Why It's a Smart AEO Target</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Upper East Side</strong></td>
+          <td>278,000</td>
+          <td>10021, 10028, 10065, 10075</td>
+          <td>Affluent area with high-value home service needs. Residents ask AI engines for premium service providers and expect specific, trusted recommendations.</td>
+        </tr>
+        <tr>
+          <td><strong>Brooklyn Heights</strong></td>
+          <td>~80,000</td>
+          <td>11201, 11217</td>
+          <td>Historic brownstone district with premium renovation and home service requirements. Strong neighbourhood identity makes hyper-local keywords very effective.</td>
+        </tr>
+        <tr>
+          <td><strong>Astoria, Queens</strong></td>
+          <td>200,000</td>
+          <td>11102, 11103, 11105</td>
+          <td>Densely populated, ethnically diverse, underserved by most AEO content — low competition, high opportunity for businesses that do target it.</td>
+        </tr>
+        <tr>
+          <td><strong>Midtown Manhattan</strong></td>
+          <td>120,000</td>
+          <td>10018–10036</td>
+          <td>High concentration of offices and businesses. Workers asking AI for nearby services (lunch, repairs, legal) with immediate transactional intent.</td>
+        </tr>
+        <tr>
+          <td><strong>Williamsburg</strong></td>
+          <td>150,000</td>
+          <td>11211, 11206</td>
+          <td>Young professional demographic heavily reliant on AI for local discovery. High mobile query volume, strong "near me" behaviour, lower competition than Manhattan.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout" style="margin-top: 24px;">
+    <strong>The conversion logic:</strong> Someone searching "plumber Upper East Side" knows exactly where they are and what they need. They are not browsing — they are ready to call. Local neighbourhood queries convert at 2–3× the rate of city-wide queries because the intent is more specific and the urgency is higher.
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════ 3 KEYWORD TIERS -->
+<div class="section">
+  <h2>The 3 Keyword Tiers — How Each One Works</h2>
+  <p class="section-intro">Every business category in every city generates three types of keywords. Each tier serves a different purpose in your AEO strategy. You need all three to build a complete presence across AI answer engines.</p>
+
+  <!-- BIG CITY -->
+  <div class="kw-type big-city">
+    <div style="display:flex; align-items:center; gap:12px; margin-bottom:6px;">
+      <span class="badge badge-blue">High Volume</span>
+      <span class="badge badge-rose">High Competition</span>
+      <span class="badge badge-blue">Brand Authority</span>
+    </div>
+    <h3>Tier 1 — Big City Keywords</h3>
+    <p class="subtitle">Structure: [Service] + [City Name] · Example: "emergency plumber New York"</p>
+
+    <p style="font-size:14px; color: #1e40af; margin-bottom: 16px;">These are the high-volume, high-competition queries that define your market. Winning on these builds massive brand authority but requires the most effort and the most content investment.</p>
+
+    <div style="margin-bottom: 14px;">
+      <span class="kw-example">emergency plumber New York</span>
+      <span class="kw-example">dentist Los Angeles</span>
+      <span class="kw-example">car repair Chicago</span>
+      <span class="kw-example">personal injury lawyer Houston</span>
+      <span class="kw-example">HVAC company Miami</span>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Metric</th>
+            <th>Rating</th>
+            <th>Explanation</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><strong>Search Volume</strong></td><td><span class="badge badge-green">High</span></td><td>City-wide population × category demand = thousands of queries per month across all AI engines combined.</td></tr>
+          <tr><td><strong>Competition</strong></td><td><span class="badge badge-rose">Very High</span></td><td>Every major business in the city is competing for the same AI citation. Large companies with established web presence dominate.</td></tr>
+          <tr><td><strong>User Intent</strong></td><td><span class="badge badge-blue">Transactional</span></td><td>Person is ready to hire. "Emergency plumber New York" = someone with a burst pipe who needs help NOW.</td></tr>
+          <tr><td><strong>Conversion Rate</strong></td><td><span class="badge badge-green">High</span></td><td>When you win this keyword in an AI answer, the conversion is extremely high because users trust the AI recommendation.</td></tr>
+          <tr><td><strong>Best Content Type</strong></td><td colspan="2">Dedicated city-level service page: "Emergency Plumbing Services in New York City" — comprehensive, authoritative, with specific NYC details (borough coverage, NYC licensing, response time guarantees).</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="font-size:13px; color: #1e40af; margin-top:14px;"><strong>AEO Angle:</strong> AI engines cite businesses with city-specific content that demonstrates deep local expertise. Generic "we serve NYC" isn't enough — you need content that answers "Who handles this specific service type in this specific city with specific credentials?"</p>
+  </div>
+
+  <!-- LOCAL -->
+  <div class="kw-type local">
+    <div style="display:flex; align-items:center; gap:12px; margin-bottom:6px;">
+      <span class="badge badge-amber">Lower Volume</span>
+      <span class="badge badge-green">Low Competition</span>
+      <span class="badge badge-green">Highest Conversion</span>
+    </div>
+    <h3>Tier 2 — Local Neighbourhood Keywords</h3>
+    <p class="subtitle">Structure: [Service] + [Neighbourhood/District] · Example: "plumber Upper East Side"</p>
+
+    <p style="font-size:14px; color: #065f46; margin-bottom: 16px;">These are the hidden gems of AEO. Lower volume, but dramatically lower competition. Most businesses don't optimise at the neighbourhood level — which means being first here is achievable in weeks, not years.</p>
+
+    <div style="margin-bottom: 14px;">
+      <span class="kw-example">plumber Upper East Side</span>
+      <span class="kw-example">dentist Midtown Manhattan</span>
+      <span class="kw-example">hair salon Brooklyn Heights</span>
+      <span class="kw-example">electrician Williamsburg Brooklyn</span>
+      <span class="kw-example">tutoring Astoria Queens</span>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Metric</th>
+            <th>Rating</th>
+            <th>Explanation</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><strong>Search Volume</strong></td><td><span class="badge badge-amber">Medium–Low</span></td><td>Neighbourhood population × category demand is smaller, but the query is highly specific — quality over quantity.</td></tr>
+          <tr><td><strong>Competition</strong></td><td><span class="badge badge-green">Low</span></td><td>Fewer than 5% of businesses create neighbourhood-specific AEO content. The ones that do win by default.</td></tr>
+          <tr><td><strong>User Intent</strong></td><td><span class="badge badge-blue">Transactional</span></td><td>Someone searching "plumber Upper East Side" is extremely close to hiring. They've already narrowed it down to their neighbourhood.</td></tr>
+          <tr><td><strong>Conversion Rate</strong></td><td><span class="badge badge-green">Very High</span></td><td>Neighbourhood-specific searches convert 2–3× better than city-wide. The specificity signals high purchase intent.</td></tr>
+          <tr><td><strong>Best Content Type</strong></td><td colspan="2">Neighbourhood landing page: "Plumbing Services in Upper East Side, NYC" — mention specific streets, landmarks, building types (pre-war buildings, co-ops, brownstones), typical problems in that area, and response time to that neighbourhood.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="font-size:13px; color: #065f46; margin-top:14px;"><strong>AEO Angle:</strong> AI engines love hyper-local specificity because it makes their answer more useful to the person asking. A response that says "Joe's Plumbing specifically serves Upper East Side and is familiar with the older building infrastructure there" is a far better answer than "here are some NYC plumbers."</p>
+  </div>
+
+  <!-- NEAR ME -->
+  <div class="kw-type near-me">
+    <div style="display:flex; align-items:center; gap:12px; margin-bottom:6px;">
+      <span class="badge badge-amber">Variable Volume</span>
+      <span class="badge badge-green">Low Competition</span>
+      <span class="badge badge-purple">Highest Intent</span>
+    </div>
+    <h3>Tier 3 — "Near Me" Keywords</h3>
+    <p class="subtitle">Structure: [Service] + "near me" · Example: "emergency plumber near me"</p>
+
+    <p style="font-size:14px; color: #78350f; margin-bottom: 16px;">The highest-intent keywords in existence. When someone types or says "plumber near me" into an AI engine, they need someone RIGHT NOW. These queries trigger AI engines to use the user's real-time location data to return the most locally relevant answer.</p>
+
+    <div style="margin-bottom: 14px;">
+      <span class="kw-example">plumber near me</span>
+      <span class="kw-example">emergency dentist near me</span>
+      <span class="kw-example">car repair near me</span>
+      <span class="kw-example">best pizza near me open now</span>
+      <span class="kw-example">24 hour locksmith near me</span>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Metric</th>
+            <th>Rating</th>
+            <th>Explanation</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><strong>Search Volume</strong></td><td><span class="badge badge-green">Very High</span></td><td>"Near me" queries are the fastest-growing query type in AI engines. Driven by mobile and voice — millions of daily queries across all categories.</td></tr>
+          <tr><td><strong>Competition</strong></td><td><span class="badge badge-amber">Medium</span></td><td>AI engines resolve "near me" using location data, not just content. Having a complete Google Business Profile + local citations + AEO content gives you a huge edge.</td></tr>
+          <tr><td><strong>User Intent</strong></td><td><span class="badge badge-purple">Immediate Need</span></td><td>This is the purest expression of transactional intent. The user is mobile, needs something now, and will act on the first good recommendation they receive.</td></tr>
+          <tr><td><strong>Conversion Rate</strong></td><td><span class="badge badge-green">Highest</span></td><td>Near me queries convert at 15–20% because the user is actively seeking to hire/visit immediately. This is the top of the intent funnel.</td></tr>
+          <tr><td><strong>Best Content Type</strong></td><td colspan="2">Google Business Profile optimisation + location pages with "serving [neighbourhood], [neighbourhood], and surrounding areas" + schema markup for LocalBusiness with precise geo-coordinates + mobile-optimised contact page with click-to-call.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="font-size:13px; color: #78350f; margin-top:14px;"><strong>AEO Angle:</strong> AI engines handling "near me" queries resolve the location from the user's device and then pull from their index of local businesses with strong AEO signals. Your business needs: complete NAP (Name, Address, Phone) consistency across all platforms, a verified Google Business Profile, and content that explicitly names your service area neighbourhoods.</p>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════ 10 CATEGORIES -->
+<div class="section">
+  <h2>The 10 Business Categories — What Each One Covers</h2>
+  <p class="section-intro">We generate keywords for 10 business categories that represent the full spectrum of local business types. Each category has its own intent patterns, competition dynamics, and AEO strategies.</p>
+
+  <div class="card-grid card-grid-2">
+
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+        <h3>🔧 Home Services</h3>
+        <span class="badge badge-purple">Very High AEO Demand</span>
+      </div>
+      <p style="font-size:13px; color:var(--muted);">Plumbers, electricians, HVAC technicians, roofers, painters, landscapers, house cleaners, pest control, general contractors.</p>
+      <p style="font-size:13px; margin-top:10px;"><strong>Why AEO matters here:</strong> Home emergencies require immediate answers. "Emergency plumber near me" is the prototypical AEO query — the user cannot afford to scroll through links. AI engines win this category decisively over Google because they give an immediate answer with a phone number.</p>
+    </div>
+
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+        <h3>🏥 Health &amp; Wellness</h3>
+        <span class="badge badge-rose">YMYL — High Stakes</span>
+      </div>
+      <p style="font-size:13px; color:var(--muted);">Dentists, doctors, chiropractors, physical therapists, gyms, yoga studios, mental health therapists, optometrists.</p>
+      <p style="font-size:13px; margin-top:10px;"><strong>Why AEO matters here:</strong> Health queries are Your Money Your Life (YMYL) — AI engines are conservative in citing providers, which means being cited carries enormous trust. Businesses with strong reviews, credentials, and neighbourhood-specific content get cited most.</p>
+    </div>
+
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+        <h3>🍕 Food &amp; Beverage</h3>
+        <span class="badge badge-green">Highest "Near Me" Volume</span>
+      </div>
+      <p style="font-size:13px; color:var(--muted);">Restaurants, cafés, bakeries, pizza places, ice cream shops, food trucks, bars, brunch spots, delivery kitchens.</p>
+      <p style="font-size:13px; margin-top:10px;"><strong>Why AEO matters here:</strong> "Best pizza near me open now" is one of the most common AI queries in existence. The food category has the most "near me + time-sensitive" query volume. AI engines pull from Yelp, Google Reviews, and restaurant-specific structured data.</p>
+    </div>
+
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+        <h3>🛍️ Retail</h3>
+        <span class="badge badge-blue">Location-Specific</span>
+      </div>
+      <p style="font-size:13px; color:var(--muted);">Clothing stores, pharmacies, cell phone shops, bookstores, hardware stores, electronics, furniture, sporting goods.</p>
+      <p style="font-size:13px; margin-top:10px;"><strong>Why AEO matters here:</strong> Retail is highly location-sensitive. People ask AI "Where can I buy X near [neighbourhood]?" — a query that traditional Google often answers poorly with giant retailers. Local shops have an AEO advantage if they create neighbourhood-specific content.</p>
+    </div>
+
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+        <h3>⚖️ Professional Services</h3>
+        <span class="badge badge-purple">High Conversion Value</span>
+      </div>
+      <p style="font-size:13px; color:var(--muted);">Lawyers, accountants, CPAs, real estate agents, financial advisors, insurance agents, mortgage brokers, notaries.</p>
+      <p style="font-size:13px; margin-top:10px;"><strong>Why AEO matters here:</strong> Each client relationship is worth thousands of dollars. "Personal injury lawyer Brooklyn" is an extremely high-value AEO keyword. Clients ask AI for recommendations because they trust it more than paid Google Ads (which dominate legal search).</p>
+    </div>
+
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+        <h3>🚗 Automotive</h3>
+        <span class="badge badge-amber">Emergency-Driven</span>
+      </div>
+      <p style="font-size:13px; color:var(--muted);">Auto repair shops, car dealerships, tire shops, oil change services, brake shops, detailing, body shops, towing.</p>
+      <p style="font-size:13px; margin-top:10px;"><strong>Why AEO matters here:</strong> Car problems are stressful and urgent. "Tire shop open now near me" is a classic emergency AEO query. Automotive businesses that appear in AI answers for neighbourhood-level queries see immediate call volume.</p>
+    </div>
+
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+        <h3>💇 Personal Services</h3>
+        <span class="badge badge-green">High Repeat Business</span>
+      </div>
+      <p style="font-size:13px; color:var(--muted);">Hair salons, barbers, spas, nail salons, pet grooming, dry cleaners, tailors, travel agencies, photography studios.</p>
+      <p style="font-size:13px; margin-top:10px;"><strong>Why AEO matters here:</strong> Personal services are highly neighbourhood-specific — people don't travel far for a haircut. "Best barber in Williamsburg" is a very answerable AEO query with clear neighbourhood identity. Once AI recommends a provider and the client loves them, they become a loyal repeat customer.</p>
+    </div>
+
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+        <h3>📚 Education</h3>
+        <span class="badge badge-blue">Parent-Driven Queries</span>
+      </div>
+      <p style="font-size:13px; color:var(--muted);">Tutoring centres, SAT/ACT prep, music lessons, dance studios, language schools, coding bootcamps, art classes, after-school programmes.</p>
+      <p style="font-size:13px; margin-top:10px;"><strong>Why AEO matters here:</strong> Parents use AI extensively for researching local education options. "Best SAT tutor in Upper East Side" is a high-intent query from a parent ready to spend significant money. Education queries have a longer sales cycle but very high contract values.</p>
+    </div>
+
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+        <h3>💻 Technology / IT</h3>
+        <span class="badge badge-purple">B2B + Consumer</span>
+      </div>
+      <p style="font-size:13px; color:var(--muted);">IT support, web design, computer repair, software development, network setup, cybersecurity, data recovery, tech consulting.</p>
+      <p style="font-size:13px; margin-top:10px;"><strong>Why AEO matters here:</strong> Tech problems are urgent and the solution needs to be trustworthy. "Computer repair near me" and "IT support for small business [city]" are high-converting AEO queries. B2B tech queries also go through AI engines when decision-makers research vendors.</p>
+    </div>
+
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+        <h3>🎉 Hospitality</h3>
+        <span class="badge badge-amber">Event-Driven</span>
+      </div>
+      <p style="font-size:13px; color:var(--muted);">Hotels, event planners, wedding venues, catering companies, party supply rental, photography, florists, DJ services.</p>
+      <p style="font-size:13px; margin-top:10px;"><strong>Why AEO matters here:</strong> Weddings and events are planned months in advance using extensive AI research. "Best wedding venue in [neighbourhood]" and "catering company Brooklyn Heights" are high-dollar, research-driven queries where AI answers carry enormous influence over the final decision.</p>
+    </div>
+
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════ HOW TO READ THE OUTPUT -->
+<div class="section">
+  <h2>How to Read the Keyword Output</h2>
+  <p class="section-intro">Every keyword generated by the tool comes with 6 data points. Here's how to interpret each one and what action to take.</p>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Field</th>
+          <th>What It Means</th>
+          <th>How to Use It</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Keyword</strong></td>
+          <td>The exact phrase to target. Use it verbatim in your page title, H1, and first paragraph.</td>
+          <td>This is the query you want AI engines to associate with your business.</td>
+        </tr>
+        <tr>
+          <td><strong>Volume</strong> <span class="badge badge-green" style="margin-left:6px;">High / Medium / Low</span></td>
+          <td>Relative query frequency across AI engines. High = thousands of queries/month. Low = hundreds but very targeted.</td>
+          <td>High volume = prioritise for main service pages. Low volume = neighbourhood landing pages.</td>
+        </tr>
+        <tr>
+          <td><strong>Competition</strong> <span class="badge badge-rose" style="margin-left:6px;">Very High → Low</span></td>
+          <td>How many other businesses are competing for the same AI citation. Very High = lots of established content exists.</td>
+          <td>Low competition keywords should be tackled first — fastest path to appearing in AI answers.</td>
+        </tr>
+        <tr>
+          <td><strong>Intent</strong> <span class="badge badge-purple" style="margin-left:6px;">Transactional</span> <span class="badge badge-blue" style="margin-left:4px;">Commercial</span> <span class="badge badge-slate" style="margin-left:4px;">Informational</span></td>
+          <td><strong>Transactional</strong> = ready to hire/buy now. <strong>Commercial</strong> = comparing options before buying. <strong>Informational</strong> = researching, not yet ready to buy.</td>
+          <td>Transactional keywords need a phone number and clear CTA. Informational keywords need educational content that positions your expertise.</td>
+        </tr>
+        <tr>
+          <td><strong>Conversion</strong> <span class="badge badge-green" style="margin-left:6px;">High / Medium / Low</span></td>
+          <td>How likely a person using this keyword is to become a paying customer after seeing your business cited in an AI answer.</td>
+          <td>High conversion = invest most in content for these. This is your ROI priority ranking.</td>
+        </tr>
+        <tr>
+          <td><strong>AEO Angle</strong></td>
+          <td>The specific mechanism by which this keyword gets your business cited in an AI answer. This is unique to AEO — SEO tools don't tell you this.</td>
+          <td>This tells you WHAT to write. If the AEO angle is "AI engines cite businesses that list their specific neighbourhood service areas", then create a page that explicitly lists every neighbourhood you serve.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="pill-divider">Sample Output</div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Keyword</th>
+          <th>Location</th>
+          <th>Volume</th>
+          <th>Competition</th>
+          <th>Intent</th>
+          <th>Convert</th>
+          <th>AEO Angle</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="kw">emergency plumber New York</span><br><small style="color:var(--muted);">NYC's 8.3M pop drives massive emergency query volume</small></td>
+          <td>New York, NY</td>
+          <td><span class="badge badge-green">High</span></td>
+          <td><span class="badge badge-rose">Very High</span></td>
+          <td><span class="badge badge-purple">Transactional</span></td>
+          <td><span class="badge badge-green">High</span></td>
+          <td>AI answers cite providers with immediate availability, NYC licensing details, and transparent pricing</td>
+        </tr>
+        <tr>
+          <td><span class="kw">plumber Upper East Side</span><br><small style="color:var(--muted);">Affluent area, high-value jobs, low AEO competition</small></td>
+          <td>Upper East Side, NYC</td>
+          <td><span class="badge badge-amber">Medium</span></td>
+          <td><span class="badge badge-green">Low</span></td>
+          <td><span class="badge badge-purple">Transactional</span></td>
+          <td><span class="badge badge-green">Very High</span></td>
+          <td>AI engines prioritise businesses that explicitly name the neighbourhood and reference its specific building types (pre-war, co-op)</td>
+        </tr>
+        <tr>
+          <td><span class="kw">emergency plumber near me</span><br><small style="color:var(--muted);">Highest-intent query; user needs help immediately</small></td>
+          <td>Anywhere (location-resolved)</td>
+          <td><span class="badge badge-green">Very High</span></td>
+          <td><span class="badge badge-amber">Medium</span></td>
+          <td><span class="badge badge-purple">Transactional</span></td>
+          <td><span class="badge badge-green">Very High</span></td>
+          <td>AI resolves location from device; businesses with complete Google Business Profile + consistent NAP + local citations win</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════ CONTENT STRATEGY -->
+<div class="section">
+  <h2>The Content Strategy — What to Build and in What Order</h2>
+  <p class="section-intro">Generating keywords is only half the job. You need to know what content to create for each keyword tier. Here is the recommended page architecture for any local business using this strategy.</p>
+
+  <div class="card-grid card-grid-3">
+    <div class="card" style="border-top: 3px solid var(--primary);">
+      <h4>Priority 1 — Quick Wins</h4>
+      <h3>"Near Me" &amp; Neighbourhood Pages</h3>
+      <p style="font-size:13px; color:var(--muted); margin-top:8px;">Build one landing page per neighbourhood you serve. Each page: 400–600 words, mentions the neighbourhood explicitly in the title and multiple times in the body, lists specific streets or landmarks, includes your phone number and a Google Map embed.</p>
+      <p style="font-size:12px; color: var(--primary); margin-top:12px; font-weight:700;">⟶ Fastest to rank in AI answers — low competition, high specificity</p>
+    </div>
+    <div class="card" style="border-top: 3px solid var(--blue);">
+      <h4>Priority 2 — Authority Building</h4>
+      <h3>City-Level Service Pages</h3>
+      <p style="font-size:13px; color:var(--muted); margin-top:8px;">One comprehensive page per main service for your city. 800–1200 words. Covers: what you do, where you operate in the city (list all neighbourhoods), specific city context (building types, local regulations, common problems in your city), credentials and licensing, customer reviews from that city.</p>
+      <p style="font-size:12px; color: var(--blue); margin-top:12px; font-weight:700;">⟶ Builds trust signals AI engines need for city-wide queries</p>
+    </div>
+    <div class="card" style="border-top: 3px solid var(--emerald);">
+      <h4>Priority 3 — Long-Term Dominance</h4>
+      <h3>FAQ &amp; Question-Answer Content</h3>
+      <p style="font-size:13px; color:var(--muted); margin-top:8px;">AI engines are trained on question-answer pairs. Create blog posts or FAQ pages that directly answer the exact questions people ask AI engines about your service. Format: Question as H2, direct answer in first sentence, detailed explanation after. Include your business name and location in the answer.</p>
+      <p style="font-size:12px; color: var(--emerald); margin-top:12px; font-weight:700;">⟶ Gets you cited for informational and commercial intent queries</p>
+    </div>
+  </div>
+
+  <div class="formula-box" style="margin-top: 28px;">
+    <span class="comment"># Winning content formula for AEO neighbourhood pages</span><br><br>
+    Page Title: "[Service] in [Neighbourhood], [City] | [Business Name]"<br>
+    H1:  "Expert [Service] for [Neighbourhood] Residents"<br>
+    P1:  Direct answer — "We provide [service] to [neighbourhood] and surrounding areas..."<br>
+    P2:  Local context — reference specific streets, buildings, landmarks, local facts<br>
+    P3:  Credentials — licenses, certifications, years serving this area<br>
+    P4:  Social proof — reviews from clients in this neighbourhood<br>
+    CTA: Click-to-call phone number + address visible without scrolling<br><br>
+    <span class="comment"># Schema markup (LocalBusiness + Service) is mandatory</span><br>
+    <span class="comment"># Google Business Profile must match this page exactly</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════ AEO TIPS -->
+<div class="section">
+  <h2>5 AEO-Specific Rules for Getting Cited in AI Answers</h2>
+  <p class="section-intro">These rules are different from SEO. AI engines have different ranking factors than Google's algorithm. Applying these gives you a significant edge over businesses that only do traditional SEO.</p>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <h3>Write the Answer First</h3>
+        <p>AI engines look for content that directly answers a question in the first sentence. Don't bury the answer. Start every page and FAQ with the direct answer, then provide detail. Bad: "Welcome to Joe's Plumbing, serving NYC since 1998..." Good: "Joe's Plumbing provides 24/7 emergency plumbing services in Upper East Side, Manhattan, with response times under 45 minutes."</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <h3>NAP Consistency Across Every Platform</h3>
+        <p>Your Name, Address, and Phone number must be IDENTICAL across your website, Google Business Profile, Yelp, Facebook, Apple Maps, and every directory. AI engines cross-reference these to validate that a business is real and trustworthy. A single inconsistency reduces your citation probability significantly.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <h3>Use LocalBusiness Schema Markup</h3>
+        <p>Schema markup tells AI engines exactly what your business does, where it operates, what hours you keep, and what areas you serve. This structured data is read directly by AI engines during their web crawl. Without it, AI engines have to infer — and inference leads to errors or non-citations. Schema is the single highest-ROI technical AEO investment.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">4</div>
+      <div class="step-body">
+        <h3>Accumulate Reviews That Mention Specific Neighbourhoods</h3>
+        <p>AI engines analyse review content, not just star ratings. When a Google review says "Joe's Plumbing came to our apartment in Williamsburg in 30 minutes and fixed the issue", that review contributes to AI understanding that this business serves Williamsburg. Ask customers to mention their neighbourhood in reviews — it's one of the most powerful AEO signals available.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">5</div>
+      <div class="step-body">
+        <h3>Publish Frequently With Consistent Business References</h3>
+        <p>AI engines (especially models that retrain on web data frequently) reward businesses that have consistent, recent mentions across multiple sources. Publish one blog post per week answering a local question ("How much does a plumber cost in Upper East Side?"), earn local press mentions, and respond to reviews publicly — all of this feeds AI training data with accurate, positive information about your business.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════ PLATFORM SUMMARY -->
+<div class="section">
+  <h2>How It All Comes Together in the Platform</h2>
+  <p class="section-intro">The AEO City Strategy tool is one part of the larger Signal AEO Platform. Here is how the cities strategy connects to the rest of the tools.</p>
+
+  <div class="card-grid card-grid-2">
+    <div class="card">
+      <h3>📊 AEO City Strategy → Keyword Foundation</h3>
+      <p style="font-size:13px; color:var(--muted); margin-top:8px;">The keywords generated here feed directly into the Business Analyzer and Full AEO Audit. Run a strategy for your client's city + category, then use the keywords in the Audit to get ICE scores, Content Coverage analysis, and a Prompt Volume target.</p>
+    </div>
+    <div class="card">
+      <h3>🏢 Full AEO Audit → Business Readiness Score</h3>
+      <p style="font-size:13px; color:var(--muted); margin-top:8px;">Once you have the city keywords, the Full AEO Audit calculates the ARS (AEO Readiness Score) for a specific business using ICE scoring, Local Advantage, and Content Coverage. It tells you HOW ready this business is to capture the keywords the city strategy identified.</p>
+    </div>
+    <div class="card">
+      <h3>🔗 Backlinks Injection → Domain Authority for AEO</h3>
+      <p style="font-size:13px; color:var(--muted); margin-top:8px;">AI engines factor in domain authority when deciding whose content to cite. The Backlinks tool identifies self-creatable and earned backlink opportunities specific to the city and business type — boosting the authority signals that get your content cited.</p>
+    </div>
+    <div class="card">
+      <h3>💬 AEO Chat → Ongoing Strategy Conversations</h3>
+      <p style="font-size:13px; color:var(--muted); margin-top:8px;">The Chat tab gives you a persistent AI strategist you can ask specific questions about any keyword, neighbourhood, or strategy decision. All conversations are saved and persist across sessions — use it to dig into any keyword the City Strategy generated.</p>
+    </div>
+  </div>
+</div>
+
+</div><!-- /container -->
+
+<footer>
+  <strong>Signal AEO Platform</strong> — AEO Cities Strategy Documentation<br>
+  Answer Engine Optimization for ChatGPT · Perplexity · Google AI Overviews · Claude · Gemini · Bing Copilot
+</footer>
+
+</body>
+</html>
