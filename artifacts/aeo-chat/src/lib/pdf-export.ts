@@ -1,3 +1,11 @@
+import { marked } from "marked";
+
+marked.setOptions({ gfm: true, breaks: true } as Parameters<typeof marked.setOptions>[0]);
+
+function mdToHtml(content: string): string {
+  return marked.parse(content) as string;
+}
+
 const BRAND_CSS = `
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -32,6 +40,21 @@ const BRAND_CSS = `
   .kv-label { color: #6b7280; }
   .kv-value { font-weight: 600; }
   .footer { margin-top: 40px; padding-top: 14px; border-top: 1px solid #e5e7eb; display: flex; justify-content: space-between; font-size: 10px; color: #9ca3af; }
+  .chat-body { font-size: 12px; line-height: 1.7; color: #111827; }
+  .chat-body h1, .chat-body h2, .chat-body h3, .chat-body h4 { font-weight: 700; margin: 14px 0 6px; line-height: 1.3; color: #111827; }
+  .chat-body h1 { font-size: 16px; } .chat-body h2 { font-size: 14px; border-bottom: 1px solid #e5e7eb; padding-bottom: 4px; } .chat-body h3 { font-size: 13px; } .chat-body h4 { font-size: 12px; }
+  .chat-body p { margin: 6px 0; }
+  .chat-body ul, .chat-body ol { padding-left: 20px; margin: 6px 0; }
+  .chat-body li { margin: 2px 0; }
+  .chat-body strong { font-weight: 600; }
+  .chat-body em { font-style: italic; }
+  .chat-body code { background: #f3f4f6; padding: 1px 5px; border-radius: 3px; font-size: 11px; font-family: 'SFMono-Regular', Consolas, monospace; }
+  .chat-body hr { border: none; border-top: 1px solid #e5e7eb; margin: 12px 0; }
+  .chat-body blockquote { border-left: 3px solid #d1d5db; margin: 8px 0; padding: 6px 12px; color: #6b7280; }
+  .chat-body table { width: 100%; border-collapse: collapse; font-size: 11px; margin: 10px 0; }
+  .chat-body thead tr { background: #f9fafb; }
+  .chat-body th { padding: 7px 10px; text-align: left; border: 1px solid #e5e7eb; font-weight: 700; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: #6b7280; }
+  .chat-body td { padding: 6px 10px; border: 1px solid #e5e7eb; vertical-align: top; }
   @media print {
     body { padding: 20px 28px; }
     .no-print { display: none !important; }
@@ -272,11 +295,11 @@ export function buildChatPdf(messages: any[], conversationTitle: string): string
       <div class="section-title">Conversation — ${conversationTitle}</div>
       ${messages.map((m: any) => `
         <div class="card" style="margin-bottom:8px;border-left:3px solid ${m.role === "user" ? "#6366f1" : "#16a34a"}">
-          <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:${m.role === "user" ? "#6366f1" : "#15803d"};margin-bottom:6px">
+          <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:${m.role === "user" ? "#6366f1" : "#15803d"};margin-bottom:8px">
             ${m.role === "user" ? "You" : "Signal AEO Assistant"}
             ${m.createdAt ? ` · ${new Date(m.createdAt).toLocaleTimeString()}` : ""}
           </div>
-          <div style="font-size:12px;white-space:pre-wrap;line-height:1.6">${m.content?.replace(/</g,"&lt;").replace(/>/g,"&gt;") || ""}</div>
+          <div class="chat-body">${m.role === "assistant" ? mdToHtml(m.content ?? "") : `<p>${(m.content ?? "").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</p>`}</div>
         </div>`).join("")}
     </div>`;
 }
@@ -422,6 +445,6 @@ export function buildSingleChatMessage(msg: any, convTitle: string): string {
       <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:${accentColor};margin-bottom:10px">
         ${label}${time ? ` · ${time}` : ""}
       </div>
-      <div style="font-size:13px;white-space:pre-wrap;line-height:1.75">${(msg.content ?? "").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</div>
+      <div class="chat-body">${isUser ? `<p style="font-size:13px;line-height:1.75">${(msg.content ?? "").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</p>` : mdToHtml(msg.content ?? "")}</div>
     </div>`;
 }
