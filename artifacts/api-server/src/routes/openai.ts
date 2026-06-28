@@ -1627,4 +1627,351 @@ router.post("/openai/keyword-generator", async (req, res) => {
   }
 });
 
+// ── AEO Keyword Strategy ──────────────────────────────────────────────────────
+
+function buildAEOKeywordStrategyPrompt(cities: string[], categories: string[]): string {
+  const totalSets = cities.length * categories.length;
+  const kwPerType = totalSets <= 9 ? 5 : totalSets <= 30 ? 3 : 2;
+  const nearMeCount = totalSets <= 9 ? 3 : 2;
+
+  return `You are a senior AEO (Answer Engine Optimization) strategist. AEO targets AI-generated answers in ChatGPT, Perplexity, Google AI Overviews, Claude, Gemini — NOT traditional Google blue links.
+
+Cities: ${cities.join(", ")}
+Business categories: ${categories.join(", ")}
+
+TASK: Generate a complete AEO keyword strategy. Return ONLY valid JSON, no markdown.
+
+For each city produce:
+- City profile with 6–8 local target areas (neighborhoods, boroughs, districts, ZIP zones)
+- For EACH category × city combination: ${kwPerType} big-city keywords, ${kwPerType} local (neighborhood) keywords, ${nearMeCount} "near me" keywords
+- Each keyword needs: keyword text, location, volume (High/Medium/Low), competition (Very High/High/Medium/Low), intent (Transactional/Commercial/Informational), conversion (High/Medium/Low), aeo_angle (1 sentence on how it gets into AI answers), explanation (1 sentence strategic rationale)
+- A strategic explanation section covering big city rationale, local rationale, combined approach, content strategy, and 5 AEO-specific tips
+
+AEO keyword rules:
+- Big city: "[Service] [City]" — e.g. "emergency plumber New York"
+- Local: "[Service] [Neighborhood]" — e.g. "plumber Upper East Side"
+- Near me: "[Service] near me" variants — highest intent, triggers AI local results
+- Phrase keywords as what a person would TYPE or SPEAK into an AI engine
+- "aeo_angle" explains HOW this keyword gets the business into an AI-generated answer
+
+Return this JSON structure exactly:
+{
+  "cities": [
+    {
+      "name": "",
+      "population": "",
+      "metro_population": "",
+      "aeo_potential": "Very High|High|Medium",
+      "classification": "",
+      "key_industries": [],
+      "local_areas": [
+        { "name": "", "population": "", "zip_codes": [], "why_target": "" }
+      ]
+    }
+  ],
+  "keywords": [
+    {
+      "category": "",
+      "city": "",
+      "items": [
+        {
+          "type": "big_city|local|near_me",
+          "keyword": "",
+          "location": "",
+          "volume": "",
+          "competition": "",
+          "intent": "",
+          "conversion": "",
+          "aeo_angle": "",
+          "explanation": ""
+        }
+      ]
+    }
+  ],
+  "strategy": {
+    "big_city_rationale": "",
+    "local_rationale": "",
+    "combined_approach": "",
+    "content_strategy": "",
+    "aeo_tips": []
+  }
+}`;
+}
+
+router.post("/openai/aeo-keyword-strategy", async (req, res) => {
+  const cities: string[] = Array.isArray(req.body?.cities) && req.body.cities.length > 0
+    ? (req.body.cities as string[]).slice(0, 10)
+    : ["New York", "Los Angeles", "Chicago"];
+  const categories: string[] = Array.isArray(req.body?.categories) && req.body.categories.length > 0
+    ? (req.body.categories as string[]).slice(0, 10)
+    : ["Home Services"];
+
+  try {
+    const prompt = buildAEOKeywordStrategyPrompt(cities, categories);
+    const startTime = Date.now();
+
+    const completion = await createCompletion({
+      model: CHAT_MODEL,
+      max_tokens: 8000,
+      messages: [
+        { role: "system", content: "You are a senior AEO strategist. AEO = Answer Engine Optimization for AI search (ChatGPT, Perplexity, Google AI Overviews, Claude, Gemini). Return ONLY valid JSON." },
+        { role: "user",   content: prompt },
+      ],
+    });
+
+    let data: unknown;
+    try {
+      data = extractJson(completion.choices[0]?.message?.content ?? "");
+    } catch {
+      res.status(502).json({ error: "LLM returned non-JSON response" });
+      return;
+    }
+
+    const traceUrl = await recordTrace({
+      name: "aeo-keyword-strategy",
+      input: { cities, categories },
+      output: data,
+      model: completion._model_used ?? CHAT_MODEL,
+      messages: [
+        { role: "system", content: "AEO keyword strategy generator" },
+        { role: "user",   content: prompt },
+      ],
+      responseContent: completion.choices[0]?.message?.content ?? "",
+      usage: completion.usage,
+      startTime,
+    });
+
+    await db.insert(backendLogs).values({
+      event: "aeo-keyword-strategy",
+      model: CHAT_MODEL,
+      tokensUsed: completion.usage?.total_tokens ?? null,
+      responseTimeMs: Date.now() - startTime,
+      status: "success",
+      details: traceUrl,
+    });
+
+    res.json({ ...(data as object), tokens_used: completion.usage?.total_tokens ?? 0, trace_url: traceUrl });
+  } catch (err) {
+    res.status(502).json({ error: err instanceof Error ? err.message : "AEO keyword strategy failed" });
+  }
+});
+
+// ── AEO Strategy Chat ─────────────────────────────────────────────────────────
+
+router.post("/openai/aeo-strategy-chat", async (req, res) => {
+  const msgs: { role: string; content: string }[] = Array.isArray(req.body?.messages)
+    ? req.body.messages.slice(-12)
+    : [];
+  const cities: string[]     = Array.isArray(req.body?.cities)     ? req.body.cities     : [];
+  const categories: string[] = Array.isArray(req.body?.categories) ? req.body.categories : [];
+  const period: string       = req.body?.period ?? "weekly";
+
+  const periodGuide =
+    period === "daily"
+      ? `Daily focus: prioritise "near me" keywords and urgent-intent queries that need daily content freshness. Recommend what to post TODAY.`
+      : period === "monthly"
+      ? `Monthly focus: big city authority pages — one comprehensive, 1000+ word service page per selected city per month. Long-term brand building.`
+      : `Weekly focus: local neighbourhood keywords — publish 1–2 neighbourhood landing pages per week, one per city in rotation.`;
+
+  const systemPrompt = `You are an expert AEO (Answer Engine Optimization) strategist embedded in the Signal AEO Platform. You help users build and execute keyword strategies that get cited in AI answer engines: ChatGPT, Perplexity, Google AI Overviews, Claude, and Gemini.
+
+USER CONFIGURATION:
+- Target Cities: ${cities.length ? cities.join(", ") : "Not selected yet"}
+- Business Categories: ${categories.length ? categories.join(", ") : "Not selected yet"}
+- Content Schedule: ${period.charAt(0).toUpperCase() + period.slice(1)}
+
+${periodGuide}
+
+CRITICAL RULE — NON-COMPETING CITIES:
+Each city must have UNIQUE keyword angles so campaigns complement, not compete with each other. If NYC targets "plumber near Central Park", LA targets "plumber near Hollywood", Chicago targets "plumber near Wrigley Field". Never let two cities share the same landmark or hyperlocal signal.
+
+KEYWORD TIER LOGIC (for scheduling advice):
+- Daily  → "Near Me" keywords (highest intent, needs daily content freshness + GBP updates)
+- Weekly → Local neighbourhood keywords (1–2 pages/week, low competition, highest conversion)
+- Monthly → Big city authority keywords (1 comprehensive page/month, long-term brand signal)
+
+AEO PRINCIPLES to always apply:
+- Write the answer first — direct answer in the first sentence
+- NAP consistency across every platform (Name, Address, Phone must match exactly)
+- LocalBusiness schema markup is mandatory
+- Reviews mentioning specific neighbourhoods are the highest-value AEO signal
+- Hyper-local specificity always beats generic city-wide content
+
+Keep answers concise and directly actionable. When you reference keywords, tie them to the user's actual selected cities. When giving scheduling advice, use the selected period as the primary lens.`;
+
+  try {
+    const startTime = Date.now();
+    const completion = await createCompletion({
+      model: CHAT_MODEL,
+      max_tokens: 2000,
+      messages: [
+        { role: "system" as const, content: systemPrompt },
+        ...msgs.map(m => ({ role: m.role as "user" | "assistant", content: m.content })),
+      ],
+    });
+
+    const content = completion.choices[0]?.message?.content ?? "";
+
+    const traceUrl = await recordTrace({
+      name: "aeo-strategy-chat",
+      input: { cities, categories, period, last_message: msgs[msgs.length - 1]?.content ?? "" },
+      output: { content },
+      model: completion._model_used ?? CHAT_MODEL,
+      messages: [{ role: "system", content: systemPrompt }, ...msgs],
+      responseContent: content,
+      usage: completion.usage,
+      startTime,
+    });
+
+    res.json({ content, trace_url: traceUrl });
+  } catch (err) {
+    res.status(502).json({ error: err instanceof Error ? err.message : "AEO strategy chat failed" });
+  }
+});
+
+// ── AEO City Campaigns ────────────────────────────────────────────────────────
+
+function buildCityCampaignsPrompt(cities: string[]): string {
+  const cityListStr = cities.map((c, i) => `${i + 1}. **${c}**`).join("\n");
+  return `## PART 1: UNDERSTANDING AEO SIGNALS
+
+**Signal Cited AEO:** Campaigns built around keywords that trigger AI-generated answers. Examples:
+- "Best [service] in [city]"
+- "Top-rated [business type] near [landmark]"
+- "Where to find [product/service] in [neighborhood]"
+
+**Signal AEO (Local):** Campaigns built around hyperlocal signals:
+- Neighborhood names (e.g., "Upper East Side")
+- ZIP codes (e.g., "10075")
+- Landmarks (e.g., "near Central Park")
+- Events (e.g., "during Miami Art Week")
+- Local culture (e.g., "Chicago deep dish pizza")
+
+---
+
+## PART 2: CAMPAIGN GENERATION RULES
+
+1. **UNIQUENESS RULE:** Every city campaign must be DIFFERENT. Do NOT use the same keyword formulas for all cities.
+2. **LOCAL SIGNAL RULE:** For each city, identify 5-10 unique "signals" that make it special. Build campaigns around these signals.
+3. **NO COMPETITION RULE:** Ensure that keywords for City A do NOT overlap with City B.
+4. **AI-OPTIMIZATION RULE:** All campaigns must be optimized for AI search. Use natural language, questions, and complete sentences.
+5. **BUSINESS CATEGORIES:** Cover all business types (plumbers, dentists, restaurants, real estate, lawyers, etc.) but assign them strategically to cities based on demand.
+
+---
+
+## PART 3: CAMPAIGN STRUCTURE
+
+For each city, generate:
+
+### Campaign Name: [City] AEO Campaign
+
+**Unique City Signals:** (List 5-10 unique signals — landmarks, culture, industries, events)
+
+**Campaign Strategy:**
+- Explain why these signals matter for AEO
+- How AI search will pick up these signals
+- Why this campaign will NOT compete with other cities
+
+**Keyword Clusters (10+ per city):**
+Organize into 3 clusters:
+1. **Signal-Cited Keywords** (using landmark/event signals)
+2. **Service-Based Keywords** (using city + service)
+3. **Hyperlocal Keywords** (using neighborhoods/ZIPs)
+
+Format as a markdown table with columns: Cluster | Keyword | Why This Works for AEO
+
+**Content Plan for [City]:**
+1. City Main Page
+2. Service Pages (3-5 with localized content)
+3. Neighborhood Pages (3-5 with unique content)
+4. Blog Posts (5 ideas using local signals)
+5. AI-Optimized FAQs (5 questions AI search will answer)
+
+**Competition Analysis for [City]:**
+- Top 3 competitors and what keywords they rank for
+- The gap/opportunity
+
+**Conversion Strategy for [City]:**
+- Which keywords have highest intent
+- Which signals drive most conversions
+- Recommended CTA — formatted as a markdown table
+
+---
+
+## PART 4: CITIES TO GENERATE CAMPAIGNS FOR
+
+Generate complete campaigns for EACH of these cities:
+
+${cityListStr}
+
+---
+
+## PART 5: COMPETITION PREVENTION MATRIX
+
+After all city campaigns, output a **Competition Prevention Matrix** table showing unique signal keywords per city and generic keywords to avoid.
+
+## PART 6: FINAL DELIVERABLES
+
+After the matrix, output:
+1. **Keyword Master List** — All unique keywords for all cities organized by city (markdown table)
+2. **Content Calendar** — Suggested weekly/monthly publishing schedule
+3. **Citelogic Data Plan** — Which keywords to prioritize for AI citation testing, with folder mapping
+
+---
+
+Use rich markdown formatting throughout: headers (##, ###), bold, tables, bullet lists. Make it thorough, detailed, and actionable. Each city campaign should be COMPLETE and UNIQUE.`;
+}
+
+router.post("/openai/aeo-city-campaigns", async (req, res) => {
+  const cities: string[] = Array.isArray(req.body?.cities) && req.body.cities.length > 0
+    ? (req.body.cities as string[]).slice(0, 25)
+    : ["New York", "Los Angeles", "Chicago", "Miami", "Houston"];
+
+  try {
+    const prompt = buildCityCampaignsPrompt(cities);
+    const startTime = Date.now();
+
+    const completion = await createCompletion({
+      model: CHAT_MODEL,
+      max_tokens: 12000,
+      messages: [
+        {
+          role: "system",
+          content: "You are a Local Marketing Strategist specializing in Answer Engine Optimization (AEO) for AI-driven search platforms including ChatGPT, Perplexity, Google AI Overviews, Claude, Gemini, and Bing Copilot. Generate detailed, unique, city-specific AEO campaigns in rich markdown format. Each campaign must be distinct and non-competing. Do not return JSON — return well-formatted markdown text.",
+        },
+        { role: "user", content: prompt },
+      ],
+    });
+
+    const content = completion.choices[0]?.message?.content ?? "";
+
+    const traceUrl = await recordTrace({
+      name: "aeo-city-campaigns",
+      input: { cities },
+      output: { content_length: content.length },
+      model: completion._model_used ?? CHAT_MODEL,
+      messages: [
+        { role: "system", content: "AEO city campaigns generator" },
+        { role: "user",   content: prompt },
+      ],
+      responseContent: content,
+      usage: completion.usage,
+      startTime,
+    });
+
+    await db.insert(backendLogs).values({
+      event: "aeo-city-campaigns",
+      model: CHAT_MODEL,
+      tokensUsed: completion.usage?.total_tokens ?? null,
+      responseTimeMs: Date.now() - startTime,
+      status: "success",
+      details: traceUrl,
+    });
+
+    res.json({ content, tokens_used: completion.usage?.total_tokens ?? 0, trace_url: traceUrl });
+  } catch (err) {
+    res.status(502).json({ error: err instanceof Error ? err.message : "AEO city campaigns failed" });
+  }
+});
+
 export default router;

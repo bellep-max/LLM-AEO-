@@ -13,6 +13,7 @@ import { HealthMonitorPage } from "@/pages/health-monitor";
 import { DailyOverviewPage } from "@/pages/daily-overview";
 import { ArchivePage } from "@/pages/archive";
 import { KeywordGeneratorPage } from "@/pages/keyword-generator";
+import { AEOKeywordStrategyPage } from "@/pages/aeo-keyword-strategy";
 import { HistoryProvider, useHistory } from "@/contexts/history-context";
 import { onChatCompletion } from "@/hooks/use-global-chat";
 
@@ -50,6 +51,7 @@ function Router() {
         <Route path="/daily-overview" component={DailyOverviewPage} />
         <Route path="/archive" component={ArchivePage} />
         <Route path="/keyword-generator" component={KeywordGeneratorPage} />
+        <Route path="/aeo-keyword-strategy" component={AEOKeywordStrategyPage} />
         <Route component={NotFound} />
       </Switch>
     </Layout>

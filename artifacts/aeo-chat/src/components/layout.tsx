@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { MessageSquare, LayoutDashboard, Terminal, ExternalLink, Trash2, BarChart2, Activity, Calendar, Archive, Loader2, Sparkles } from "lucide-react";
+import { MessageSquare, LayoutDashboard, Terminal, ExternalLink, Trash2, BarChart2, Activity, Calendar, Archive, Loader2, Sparkles, Globe } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useHistory } from "@/contexts/history-context";
 import { useGlobalChat } from "@/hooks/use-global-chat";
@@ -12,6 +12,7 @@ interface LayoutProps {
 const TYPE_BADGE: Record<string, string> = {
   "Business Analyzer": "bg-blue-500/15 text-blue-600 border-blue-500/30",
   "Full AEO Audit":    "bg-violet-500/15 text-violet-600 border-violet-500/30",
+  "Backlinks":         "bg-amber-500/15 text-amber-600 border-amber-500/30",
   "AEO Chat":          "bg-emerald-500/15 text-emerald-600 border-emerald-500/30",
 };
 
@@ -27,6 +28,7 @@ export function Layout({ children }: LayoutProps) {
     { href: "/health-monitor", label: "Health Monitor", icon: Activity },
     { href: "/daily-overview", label: "Daily Overview", icon: Calendar },
     { href: "/keyword-generator", label: "Keyword Generator", icon: Sparkles },
+    { href: "/aeo-keyword-strategy", label: "AEO City Strategy", icon: Globe },
     { href: "/backend", label: "Backend Logs", icon: Terminal },
     { href: "/archive", label: "Archive", icon: Archive },
   ];

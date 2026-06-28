@@ -1,4 +1,22 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
+
+// ── localStorage helpers ──────────────────────────────────────────────────────
+const LS = {
+  get: <T,>(key: string): T | null => {
+    try { const v = localStorage.getItem(key); return v ? (JSON.parse(v) as T) : null; }
+    catch { return null; }
+  },
+  set: (key: string, val: unknown) => {
+    try { localStorage.setItem(key, JSON.stringify(val)); } catch {}
+  },
+  del: (key: string) => { try { localStorage.removeItem(key); } catch {} },
+};
+const LS_VIEW      = "aeo-active-view";
+const LS_BIZ_NAME  = "aeo-biz-name";
+const LS_BIZ_DESC  = "aeo-biz-desc";
+const LS_ANALYSIS  = "aeo-analysis-result";
+const LS_AUDIT     = "aeo-audit-result";
+const LS_BACKLINKS = "aeo-backlinks-result";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Send, Plus, Trash2, TerminalSquare, Sparkles, Link2, Target, RotateCcw, FileDown } from "lucide-react";
@@ -250,11 +268,11 @@ type ActiveView = "analyzer" | "analysis" | "backlinks" | "chat";
 export function ChatPage() {
   const queryClient = useQueryClient();
   const [activeId, setActiveId] = useState<number | null>(null);
-  const [activeView, setActiveView] = useState<ActiveView>("analyzer");
+  const [activeView, setActiveView] = useState<ActiveView>(() => LS.get<ActiveView>(LS_VIEW) ?? "analyzer");
   const [input, setInput] = useState("");
-  const [businessName, setBusinessName] = useState("");
-  const [businessDescription, setBusinessDescription] = useState("");
-  const [analysisResult, setAnalysisResult] = useState<BusinessAnalysisResult | null>(null);
+  const [businessName, setBusinessName] = useState<string>(() => LS.get<string>(LS_BIZ_NAME) ?? "");
+  const [businessDescription, setBusinessDescription] = useState<string>(() => LS.get<string>(LS_BIZ_DESC) ?? "");
+  const [analysisResult, setAnalysisResult] = useState<BusinessAnalysisResult | null>(() => LS.get<BusinessAnalysisResult>(LS_ANALYSIS));
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [streamingText, setStreamingText] = useState("");
@@ -266,7 +284,7 @@ export function ChatPage() {
   const [blKeyword, setBlKeyword]             = useState("");
   const [blTargetUrl, setBlTargetUrl]         = useState("");
   const [blCompetitors, setBlCompetitors]     = useState("");
-  const [backlinksResult, setBacklinksResult] = useState<BacklinksResult | null>(null);
+  const [backlinksResult, setBacklinksResult] = useState<BacklinksResult | null>(() => LS.get<BacklinksResult>(LS_BACKLINKS));
   const [backlinksError, setBacklinksError]   = useState<string | null>(null);
   const [isGeneratingBl, setIsGeneratingBl]   = useState(false);
   const [expandedBl, setExpandedBl]           = useState<number | null>(null);
@@ -302,12 +320,20 @@ export function ChatPage() {
   const [competitorDensity, setCompetitorDensity] = useState("");
   const [websiteUrl, setWebsiteUrl] = useState("");
   const [location, setLocation] = useState("");
-  const [auditResult, setAuditResult] = useState<BusinessAuditResult | null>(null);
+  const [auditResult, setAuditResult] = useState<BusinessAuditResult | null>(() => LS.get<BusinessAuditResult>(LS_AUDIT));
   const [auditError, setAuditError] = useState<string | null>(null);
   const [isAuditing, setIsAuditing] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const { addEntry, selectedEntry, selectEntry } = useHistory();
+
+  // ── Persist state so navigating away and back restores everything ─────────
+  useEffect(() => { LS.set(LS_VIEW, activeView); }, [activeView]);
+  useEffect(() => { LS.set(LS_BIZ_NAME, businessName); }, [businessName]);
+  useEffect(() => { LS.set(LS_BIZ_DESC, businessDescription); }, [businessDescription]);
+  useEffect(() => { analysisResult  ? LS.set(LS_ANALYSIS,  analysisResult)  : LS.del(LS_ANALYSIS);  }, [analysisResult]);
+  useEffect(() => { auditResult     ? LS.set(LS_AUDIT,     auditResult)     : LS.del(LS_AUDIT);     }, [auditResult]);
+  useEffect(() => { backlinksResult ? LS.set(LS_BACKLINKS, backlinksResult) : LS.del(LS_BACKLINKS); }, [backlinksResult]);
 
   const { data: conversations = [], isLoading: loadingConversations } = useListOpenaiConversations();
   const { data: messages = [], isLoading: loadingMessages } = useListOpenaiMessages(
@@ -334,6 +360,11 @@ export function ChatPage() {
     } else if (selectedEntry.type === "Full AEO Audit") {
       setAuditResult(selectedEntry.result as BusinessAuditResult);
       setActiveView("analysis");
+    } else if (selectedEntry.type === "Backlinks") {
+      setBacklinksResult(selectedEntry.result as BacklinksResult);
+      setActiveView("backlinks");
+    } else if (selectedEntry.type === "AEO Chat") {
+      setActiveView("chat");
     }
     selectEntry(null); // consume so re-selecting same entry works again
   }, [selectedEntry]);
@@ -350,6 +381,7 @@ export function ChatPage() {
     setBusinessDescription("");
     setAnalysisResult(null);
     setAnalysisError(null);
+    LS.del(LS_BIZ_NAME); LS.del(LS_BIZ_DESC); LS.del(LS_ANALYSIS);
   };
 
   const clearAudit = () => {
@@ -363,6 +395,7 @@ export function ChatPage() {
     setLocation("");
     setAuditResult(null);
     setAuditError(null);
+    LS.del(LS_BIZ_NAME); LS.del(LS_BIZ_DESC); LS.del(LS_AUDIT);
   };
 
   const clearSelfCreatable = () => {
@@ -373,6 +406,7 @@ export function ChatPage() {
     setBacklinksResult(null);
     setBacklinksError(null);
     setExpandedBl(null);
+    LS.del(LS_BACKLINKS);
   };
 
   const clearLinkProspects = () => {
@@ -643,6 +677,12 @@ export function ChatPage() {
       const payload = await res.json();
       if (!res.ok) throw new Error(payload.error || "Backlinks generation failed");
       setBacklinksResult(payload as BacklinksResult);
+      addEntry({
+        type: "Backlinks",
+        businessName: blKeyword.trim(),
+        traceUrl: (payload as BacklinksResult).trace_url ?? null,
+        result: payload,
+      });
     } catch (err) {
       setBacklinksError(err instanceof Error ? err.message : "Failed to generate backlinks");
       setBacklinksResult(null);
