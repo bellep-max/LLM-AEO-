@@ -1974,4 +1974,157 @@ router.post("/openai/aeo-city-campaigns", async (req, res) => {
   }
 });
 
+// ── Business Improvement Brief ────────────────────────────────────────────────
+
+router.post("/openai/business-improvement-brief", async (req, res) => {
+  const {
+    bizName, clientName, campaignName, prediction, predictionLabel, why, action,
+    phase, phaseLabel, daysActive, totalSessions, targetPerDay,
+    avg7DaySessions, avg7DaySuccessRate, gapDays7,
+    missedKeywords3Plus = [], missedKeywords5Plus = [],
+    platformWindows = [], allKeywords = [],
+    hasRankData = false, rankDetectionRate = null, avgRankPosition = null,
+    improvementPriorities = [],
+  } = req.body ?? {};
+
+  if (!bizName) { res.status(400).json({ error: "bizName required" }); return; }
+
+  const rankSection = hasRankData
+    ? `AI Citation Rate: ${rankDetectionRate !== null ? `${Math.round(rankDetectionRate * 100)}%` : "unknown"}
+Average Rank Position (when cited): ${avgRankPosition ?? "unknown"}`
+    : "AI Citation Data: Not yet available for this business";
+
+  const prioritiesSection = improvementPriorities.length > 0
+    ? improvementPriorities.map((p: any, i: number) => `${i + 1}. [${p.level.toUpperCase()}] ${p.message} — ${p.detail}`).join("\n")
+    : "No improvement priorities flagged — business is performing well.";
+
+  const systemPrompt = `You are a senior AEO (Answer Engine Optimization) strategist. Write concise, specific, actionable improvement briefs for local businesses based on their session and ranking data.
+
+Keep the brief to 3 short paragraphs:
+1. Current state (what the data shows, no fluff)
+2. Top 2-3 specific actions this week
+3. What success looks like in 14 days
+
+Always tie advice to the specific data provided. Never be generic.`;
+
+  const userPrompt = `Write an improvement brief for this business:
+
+BUSINESS: ${bizName}
+CLIENT: ${clientName ?? "Unknown"}
+CAMPAIGN: ${campaignName ?? "Unknown"}
+PHASE: ${phaseLabel} (${daysActive} days active, ${totalSessions} total sessions)
+
+SESSION HEALTH:
+- Prediction: ${predictionLabel} (${prediction})
+- Target sessions/day: ${targetPerDay}
+- Avg sessions/day (7d): ${typeof avg7DaySessions === "number" ? avg7DaySessions.toFixed(1) : "0"}
+- Success rate (7d): ${typeof avg7DaySuccessRate === "number" ? `${Math.round(avg7DaySuccessRate * 100)}%` : "unknown"}
+- Days with zero sessions (last 7): ${gapDays7}
+- Why flagged: ${why || "N/A"}
+
+KEYWORD COVERAGE:
+- All keywords: ${(allKeywords as string[]).join(", ") || "None"}
+- Missed 3+ days: ${(missedKeywords3Plus as string[]).join(", ") || "None"}
+- Missed 5+ days (critical): ${(missedKeywords5Plus as string[]).join(", ") || "None"}
+
+PLATFORM WINDOWS:
+${(platformWindows as any[]).map((p: any) => `- ${p.platform}: ${p.consecutiveDaysSilent} consecutive silent days, last 3d=${p.sessionsLast3Days}, last 5d=${p.sessionsLast5Days}`).join("\n")}
+
+RANK DATA:
+${rankSection}
+
+IMPROVEMENT PRIORITIES (pre-computed):
+${prioritiesSection}`;
+
+  try {
+    const startTime = Date.now();
+    const completion = await createCompletion({
+      model: CHAT_MODEL,
+      max_tokens: 800,
+      messages: [
+        { role: "system" as const, content: systemPrompt },
+        { role: "user" as const, content: userPrompt },
+      ],
+    });
+    const content = completion.choices[0]?.message?.content ?? "";
+    const traceUrl = await recordTrace({
+      name: "business-improvement-brief",
+      input: { bizName, prediction },
+      output: { content },
+      model: completion._model_used ?? CHAT_MODEL,
+      messages: [{ role: "system", content: systemPrompt }, { role: "user", content: userPrompt }],
+      responseContent: content,
+      usage: completion.usage,
+      startTime,
+    });
+    res.json({ content, trace_url: traceUrl });
+  } catch (err) {
+    res.status(502).json({ error: err instanceof Error ? err.message : "Business improvement brief failed" });
+  }
+});
+
+// ── Daily Session Summary ─────────────────────────────────────────────────────
+
+router.post("/openai/daily-session-summary", async (req, res) => {
+  const { date, businesses = [] } = req.body ?? {};
+  if (!date) { res.status(400).json({ error: "date required" }); return; }
+
+  const bizList = (businesses as any[]).slice(0, 40);
+  const atRisk  = bizList.filter((b: any) => b.prediction === "AT_RISK");
+  const onTrack = bizList.filter((b: any) => b.prediction === "ON_TRACK");
+
+  const bizLines = bizList.map((b: any) => {
+    const rankNote = b.hasRankData
+      ? ` | Citation rate: ${b.rankDetectionRate !== null ? `${Math.round(b.rankDetectionRate * 100)}%` : "?"}, Avg rank: ${b.avgRankPosition ?? "?"}`
+      : "";
+    const priorities = (b.improvementPriorities as any[] ?? []).slice(0, 2).map((p: any) => `[${p.level}] ${p.message}`).join("; ");
+    return `- ${b.bizName} (${b.prediction}): ${b.total} sessions, ${Math.round(b.successRate * 100)}% success${rankNote}${priorities ? ` | ${priorities}` : ""}`;
+  }).join("\n");
+
+  const systemPrompt = `You are an AEO operations manager reviewing daily session data for a portfolio of local businesses. Write a concise daily summary that highlights what needs immediate attention and what is working well. Keep it under 250 words. Use bullet points for the action items section.`;
+
+  const userPrompt = `Daily session summary for ${date}:
+
+PORTFOLIO SNAPSHOT:
+- Total businesses with sessions: ${bizList.length}
+- At Risk: ${atRisk.length}
+- On Track: ${onTrack.length}
+- Other: ${bizList.length - atRisk.length - onTrack.length}
+
+PER-BUSINESS DATA:
+${bizLines}
+
+Write:
+1. One-sentence overall assessment of today's sessions
+2. Immediate attention (At Risk businesses — what specifically is wrong)
+3. What's working well (On Track businesses worth noting)
+4. One cross-portfolio pattern you notice (e.g. a platform having issues, a keyword gap trend)`;
+
+  try {
+    const startTime = Date.now();
+    const completion = await createCompletion({
+      model: CHAT_MODEL,
+      max_tokens: 600,
+      messages: [
+        { role: "system" as const, content: systemPrompt },
+        { role: "user" as const, content: userPrompt },
+      ],
+    });
+    const content = completion.choices[0]?.message?.content ?? "";
+    const traceUrl = await recordTrace({
+      name: "daily-session-summary",
+      input: { date, businessCount: bizList.length },
+      output: { content },
+      model: completion._model_used ?? CHAT_MODEL,
+      messages: [{ role: "system", content: systemPrompt }, { role: "user", content: userPrompt }],
+      responseContent: content,
+      usage: completion.usage,
+      startTime,
+    });
+    res.json({ content, trace_url: traceUrl });
+  } catch (err) {
+    res.status(502).json({ error: err instanceof Error ? err.message : "Daily session summary failed" });
+  }
+});
+
 export default router;

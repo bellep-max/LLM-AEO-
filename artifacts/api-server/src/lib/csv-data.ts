@@ -266,6 +266,13 @@ export function getBusinessRanking(bizName: string): BusinessRankSummary | null 
 
 export type Prediction = "ON_TRACK" | "AT_RISK" | "STABLE" | "TOO_EARLY";
 
+export interface ImprovementPriority {
+  level: "critical" | "warning" | "opportunity";
+  category: "sessions" | "keywords" | "platform" | "rank";
+  message: string;
+  detail: string;
+}
+
 export interface DailySessionRecord {
   date: string;
   total: number;
@@ -273,6 +280,9 @@ export interface DailySessionRecord {
   successRate: number;
   platforms: Record<string, number>;   // platform → count
   keywords: Set<string>;
+  rankSessions: number;    // sessions where has_rank === "True"
+  noRankSessions: number;  // sessions where has_rank === "False"
+  rankPositions: number[]; // position values from ranked sessions
 }
 
 export interface KeywordCoverageItem {
@@ -333,11 +343,19 @@ export interface BusinessDailyAnalysis {
   // Next ranking run (from rankings data if available)
   nextRankingRunDue: string;
 
-  // Raw daily records (last 14 days, serializable)
+  // Raw daily records (last 30 days, serializable)
   recentDays: Array<Omit<DailySessionRecord, "keywords"> & { keywords: string[] }>;
 
   // Keyword variants seen in daily CSVs (canonical kw → variant phrasings used)
   keywordVariants: Record<string, string[]>;
+
+  // Rank signals from daily CSV sessions (has_rank / rank_position columns)
+  hasRankData: boolean;
+  rankDetectionRate: number | null;  // % of sessions where AI cited this business
+  avgRankPosition: number | null;    // average position when cited
+
+  // Computed improvement priority list (ranked critical → warning → opportunity)
+  improvementPriorities: ImprovementPriority[];
 }
 
 const PLATFORMS = ["ChatGPT", "Gemini", "Perplexity"] as const;
@@ -347,6 +365,128 @@ function phaseFromDays(daysActive: number): { phase: number; label: string } {
   if (daysActive <= 14) return { phase: 2, label: "Phase 2 — Warmup" };
   if (daysActive <= 28) return { phase: 4, label: "Phase 4 — Build" };
   return { phase: 6, label: "Phase 6 — Sustain and Grow" };
+}
+
+// Extract canonical date from a daily CSV filename (e.g. "jun15_daily_*.csv" → "2026-06-15")
+const MONTH_MAP: Record<string, string> = {
+  jan: "01", feb: "02", mar: "03", apr: "04", may: "05", jun: "06",
+  jul: "07", aug: "08", sep: "09", oct: "10", nov: "11", dec: "12",
+};
+
+function extractDateFromFilename(filename: string): string | null {
+  const m = filename.match(/^([a-z]{3})(\d{2})_/i);
+  if (!m) return null;
+  const month = MONTH_MAP[m[1].toLowerCase()];
+  if (!month) return null;
+  return `2026-${month}-${m[2]}`;
+}
+
+function computeImprovementPriorities(a: {
+  gapDays7: number;
+  platformWindows: PlatformWindow[];
+  avg7DaySuccessRate: number;
+  missedKeywords5Plus: string[];
+  missedKeywords3Plus: string[];
+  hasRankData: boolean;
+  rankDetectionRate: number | null;
+  avgRankPosition: number | null;
+}): ImprovementPriority[] {
+  const out: ImprovementPriority[] = [];
+
+  // 🔴 Critical — session gaps
+  if (a.gapDays7 >= 2) {
+    out.push({
+      level: "critical", category: "sessions",
+      message: `${a.gapDays7} days with zero sessions in the last 7`,
+      detail: "Run sessions every day — gaps directly hurt ranking momentum.",
+    });
+  }
+
+  // 🔴 Critical — platform silent 5+ days
+  const silent5 = a.platformWindows.find(p => p.consecutiveDaysSilent >= 5);
+  if (silent5) {
+    out.push({
+      level: "critical", category: "platform",
+      message: `${silent5.platform} has received zero sessions for ${silent5.consecutiveDaysSilent} consecutive days`,
+      detail: `Send sessions to ${silent5.platform} today — extended silence signals content abandonment to AI engines.`,
+    });
+  }
+
+  // 🔴 Critical — not being cited in AI answers
+  if (a.hasRankData && a.rankDetectionRate !== null && a.rankDetectionRate < 0.3) {
+    out.push({
+      level: "critical", category: "rank",
+      message: `Only ${Math.round(a.rankDetectionRate * 100)}% of sessions result in an AI citation`,
+      detail: "Business largely invisible in AI answers. Review content quality, NAP consistency, and local schema markup.",
+    });
+  }
+
+  // 🟡 Warning — low success rate
+  if (a.avg7DaySuccessRate < 0.70) {
+    out.push({
+      level: "warning", category: "sessions",
+      message: `Session success rate critically low at ${Math.round(a.avg7DaySuccessRate * 100)}%`,
+      detail: "More than 1 in 3 sessions is failing. Fix proxy or platform errors before the next ranking run.",
+    });
+  }
+
+  // 🟡 Warning — keywords missed 5+ days
+  for (const kw of a.missedKeywords5Plus.slice(0, 2)) {
+    out.push({
+      level: "warning", category: "keywords",
+      message: `"${kw}" not hit in 5+ days`,
+      detail: "Re-cover this keyword in the next session wave — extended absence weakens its citation signal.",
+    });
+  }
+
+  // 🟡 Warning — ranking low in AI answers
+  if (a.hasRankData && a.avgRankPosition !== null && a.avgRankPosition > 10) {
+    out.push({
+      level: "warning", category: "rank",
+      message: `Average AI rank position is ${a.avgRankPosition.toFixed(1)} — outside top 10`,
+      detail: "Optimize content for direct answer format. Target top 5 by improving NAP signals and review quality.",
+    });
+  }
+
+  // 🟡 Warning — platform silent 3–4 days
+  const silent3 = a.platformWindows.find(p => p.consecutiveDaysSilent >= 3 && p.consecutiveDaysSilent < 5);
+  if (silent3 && !silent5) {
+    out.push({
+      level: "warning", category: "platform",
+      message: `${silent3.platform} silent for ${silent3.consecutiveDaysSilent} days`,
+      detail: `Include ${silent3.platform} in the next wave to maintain platform coverage.`,
+    });
+  }
+
+  // 🟡 Warning — success rate below target
+  if (a.avg7DaySuccessRate >= 0.70 && a.avg7DaySuccessRate < 0.90) {
+    out.push({
+      level: "warning", category: "sessions",
+      message: `Success rate at ${Math.round(a.avg7DaySuccessRate * 100)}% — below 90% target`,
+      detail: "Review session error logs to push success rate above 90% for optimal ranking signal.",
+    });
+  }
+
+  // 🟢 Opportunity — keywords missed 3 days (not already in 5+ list)
+  const missed3Only = a.missedKeywords3Plus.filter(kw => !a.missedKeywords5Plus.includes(kw));
+  for (const kw of missed3Only.slice(0, 2)) {
+    out.push({
+      level: "opportunity", category: "keywords",
+      message: `"${kw}" not hit in 3 days — getting stale`,
+      detail: "Rotate this keyword back into upcoming sessions to maintain coverage.",
+    });
+  }
+
+  // 🟢 Opportunity — rank position could improve
+  if (a.hasRankData && a.avgRankPosition !== null && a.avgRankPosition > 5 && a.avgRankPosition <= 10) {
+    out.push({
+      level: "opportunity", category: "rank",
+      message: `Average AI rank position is ${a.avgRankPosition.toFixed(1)} — in top 10 but not top 5`,
+      detail: "Add more hyperlocal signals (neighbourhood names, landmarks) to push into top 5 citations.",
+    });
+  }
+
+  return out;
 }
 
 function computePrediction(a: {
@@ -454,34 +594,47 @@ let _dailyAnalysis: BusinessDailyAnalysis[] | null = null;
 
 function loadDailyAnalysis(): BusinessDailyAnalysis[] {
   const archived = loadArchiveSet();
-  const rows = parseCSV(SESSIONS_CSV);
 
-  // Build per-business session records
   type BizData = {
-    campaignIds: Set<string>;  // unique campaign_ids (correct campaign count)
+    campaignIds: Set<string>;
     keywords: Set<string>;
     campaignName: string;
     clientName: string;
-    // date → record
     days: Map<string, DailySessionRecord>;
   };
   const bizMap = new Map<string, BizData>();
 
-  for (const row of rows) {
-    const biz = row["biz_name"]?.trim();
-    if (biz && archived.has(biz)) continue;
-    const date = row["date"]?.slice(0, 10);
-    if (!biz || !date || date.length !== 10) continue;
+  // Dedup across SESSIONS_CSV and daily CSVs by timestamp+biz_name
+  const seenTimestamps = new Set<string>();
 
-    // Support both column naming conventions:
-    // sessions-all export uses ai_platform/keyword_text
-    // daily consolidated CSVs use platform/keyword
+  function processRow(row: Record<string, string>, canonicalDate: string | null) {
+    const biz = row["biz_name"]?.trim();
+    if (!biz || (archived.has(biz))) return;
+
+    // Filename date wins for daily CSVs; fall back to date column for SESSIONS_CSV
+    const date = canonicalDate ?? row["date"]?.slice(0, 10);
+    if (!date || date.length !== 10) return;
+
+    // Dedup by timestamp+biz
+    const ts = row["timestamp"]?.trim();
+    if (ts) {
+      const key = `${ts}|||${biz}`;
+      if (seenTimestamps.has(key)) return;
+      seenTimestamps.add(key);
+    }
+
     const platform = normPlatform(row["ai_platform"] ?? row["platform"] ?? "");
     const keyword = (row["keyword_text"] ?? row["keyword"] ?? "").trim();
     const campaignId = row["campaign_id"]?.trim() ?? "";
     const isSuccess = row["status"] === "success";
     const campaignName = row["campaign_name"]?.trim() ?? "";
     const clientName = row["client_name"]?.trim() ?? "";
+
+    // Rank signals (only present in newer daily CSV format)
+    const hasRankCol = "has_rank" in row;
+    const hasRank = row["has_rank"] === "True";
+    const rankPos = row["rank_position"]?.trim();
+    const rankPosNum = rankPos && rankPos !== "" && rankPos !== "null" ? parseInt(rankPos, 10) : null;
 
     if (!bizMap.has(biz)) bizMap.set(biz, { campaignIds: new Set(), keywords: new Set(), campaignName, clientName, days: new Map() });
     const bd = bizMap.get(biz)!;
@@ -490,12 +643,39 @@ function loadDailyAnalysis(): BusinessDailyAnalysis[] {
     if (campaignName && !bd.campaignName) bd.campaignName = campaignName;
     if (clientName && !bd.clientName) bd.clientName = clientName;
 
-    if (!bd.days.has(date)) bd.days.set(date, { date, total: 0, success: 0, successRate: 0, platforms: {}, keywords: new Set() });
+    if (!bd.days.has(date)) {
+      bd.days.set(date, { date, total: 0, success: 0, successRate: 0, platforms: {}, keywords: new Set(), rankSessions: 0, noRankSessions: 0, rankPositions: [] });
+    }
     const day = bd.days.get(date)!;
     day.total++;
     if (isSuccess) day.success++;
     if (platform) day.platforms[platform] = (day.platforms[platform] ?? 0) + 1;
     if (keyword) day.keywords.add(keyword);
+
+    // Rank data (only when has_rank column is present)
+    if (hasRankCol) {
+      if (hasRank) {
+        day.rankSessions++;
+        if (rankPosNum !== null && !isNaN(rankPosNum) && rankPosNum > 0) day.rankPositions.push(rankPosNum);
+      } else {
+        day.noRankSessions++;
+      }
+    }
+  }
+
+  // ── 1. Load SESSIONS_CSV (historical baseline) ─────────────────────────────
+  for (const row of parseCSV(SESSIONS_CSV)) processRow(row, null);
+
+  // ── 2. Load daily consolidated CSV files (jun15–present) ──────────────────
+  // Filename date is the canonical date — overrides any UTC-bled date column values.
+  if (existsSync(DAILY_CSV_DIR)) {
+    let files: string[] = [];
+    try { files = readdirSync(DAILY_CSV_DIR).filter(f => f.endsWith(".csv")); } catch { /* skip */ }
+    for (const file of files) {
+      const canonicalDate = extractDateFromFilename(file);
+      if (!canonicalDate) continue; // skip non-daily files (rankings, etc.)
+      for (const row of parseCSV(resolve(DAILY_CSV_DIR, file))) processRow(row, canonicalDate);
+    }
   }
 
   // Find overall latest date across all businesses
@@ -603,6 +783,29 @@ function loadDailyAnalysis(): BusinessDailyAnalysis[] {
       if (vars && vars.size > 0) keywordVariants[kw] = [...vars].sort();
     }
 
+    // Rank signals — aggregate across ALL days
+    let totalRankSessions = 0, totalNoRankSessions = 0;
+    const allRankPositions: number[] = [];
+    for (const day of bd.days.values()) {
+      totalRankSessions += day.rankSessions;
+      totalNoRankSessions += day.noRankSessions;
+      allRankPositions.push(...day.rankPositions);
+    }
+    const hasRankData = (totalRankSessions + totalNoRankSessions) > 0;
+    const rankDetectionRate = hasRankData
+      ? totalRankSessions / (totalRankSessions + totalNoRankSessions)
+      : null;
+    const avgRankPosition = allRankPositions.length > 0
+      ? Math.round((allRankPositions.reduce((s, v) => s + v, 0) / allRankPositions.length) * 10) / 10
+      : null;
+
+    // Improvement priorities
+    const improvementPriorities = computeImprovementPriorities({
+      gapDays7, platformWindows, avg7DaySuccessRate,
+      missedKeywords5Plus, missedKeywords3Plus,
+      hasRankData, rankDetectionRate, avgRankPosition,
+    });
+
     results.push({
       bizName, clientName: bd.clientName, campaignName: bd.campaignName, numCampaigns, targetPerDay,
       allKeywords: [...bd.keywords].sort(), daysActive, totalSessions,
@@ -617,6 +820,8 @@ function loadDailyAnalysis(): BusinessDailyAnalysis[] {
       nextRankingRunDue,
       recentDays,
       keywordVariants,
+      hasRankData, rankDetectionRate, avgRankPosition,
+      improvementPriorities,
     });
   }
 
@@ -686,6 +891,10 @@ export interface DailyOverviewData {
     keywordsHitToday: string[]; platformsToday: Record<string, number>;
     allKeywords: string[];
     successRateToday: number;
+    hasRankData: boolean;
+    rankDetectionRate: number | null;
+    avgRankPosition: number | null;
+    improvementPriorities: ImprovementPriority[];
   }>;
   // Businesses that got keyword rotation on 2026-06-06 and are running below 8 sessions/day
   keywordRotationGap: Array<{
@@ -778,6 +987,14 @@ function recomputeForDate(biz: BusinessDailyAnalysis, asOfDate: string): Busines
     missedKeywords5Plus, platformWindows, missedKeywords3Plus,
   });
   const { phase, label: phaseLabel } = phaseFromDays(daysActive);
+
+  const improvementPriorities = computeImprovementPriorities({
+    gapDays7, platformWindows, avg7DaySuccessRate,
+    missedKeywords5Plus, missedKeywords3Plus,
+    hasRankData: biz.hasRankData,
+    rankDetectionRate: biz.rankDetectionRate,
+    avgRankPosition: biz.avgRankPosition,
+  });
 
   return {
     ...biz,
@@ -918,6 +1135,10 @@ function buildDailyOverview(sessions: BusinessDailyAnalysis[], asOfDate: string)
       keywordsHitToday: sess?.keywordsHitToday ?? [],
       platformsToday: sess?.platformsToday ?? {},
       allKeywords: sess?.allKeywords ?? [],
+      hasRankData: sess?.hasRankData ?? false,
+      rankDetectionRate: sess?.rankDetectionRate ?? null,
+      avgRankPosition: sess?.avgRankPosition ?? null,
+      improvementPriorities: sess?.improvementPriorities ?? [],
     });
   }
 

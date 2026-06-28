@@ -8,12 +8,19 @@ import {
   Calendar, RefreshCw, Search, Loader2, AlertCircle,
   TrendingUp, TrendingDown, Minus, AlertTriangle,
   BarChart2, CheckCircle2, ChevronDown, ChevronRight, MessageSquare,
-  ClipboardList, Zap, Eye, Trophy, Link2,
+  ClipboardList, Zap, Eye, Trophy, Link2, Sparkles, Target,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 type Prediction = "ON_TRACK" | "AT_RISK" | "STABLE" | "TOO_EARLY";
+
+interface ImprovementPriority {
+  level: "critical" | "warning" | "opportunity";
+  category: "sessions" | "keywords" | "platform" | "rank";
+  message: string;
+  detail: string;
+}
 
 interface BacklinkActionItem {
   bizName: string;
@@ -67,6 +74,10 @@ interface BizRow {
   keywordsHitToday: string[]; platformsToday: Record<string, number>;
   allKeywords: string[];
   successRateToday: number;
+  hasRankData: boolean;
+  rankDetectionRate: number | null;
+  avgRankPosition: number | null;
+  improvementPriorities: ImprovementPriority[];
 }
 
 interface AtRiskBiz {
@@ -747,8 +758,49 @@ function RankAlertCard({ alert }: { alert: RankAlert }) {
 // ── Per-business expandable report card (Section 10 format) ───────────────────
 function BizReportCard({ biz }: { biz: BizRow }) {
   const [expanded, setExpanded] = useState(false);
+  const [briefLoading, setBriefLoading] = useState(false);
+  const [briefText, setBriefText] = useState<string | null>(null);
+  const [briefError, setBriefError] = useState<string | null>(null);
   const pred = PRED[biz.prediction];
   const rkCfg = RANK_CFG[biz.rankLabel];
+
+  const generateBrief = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setBriefLoading(true);
+    setBriefError(null);
+    setBriefText(null);
+    try {
+      const res = await fetch("/api/openai/business-improvement-brief", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bizName: biz.bizName,
+          clientName: biz.clientName,
+          phase: biz.phase,
+          phaseLabel: biz.phaseLabel,
+          prediction: biz.prediction,
+          avg7DaySessions: biz.avg7DaySessions,
+          targetPerDay: biz.targetPerDay,
+          avg7DaySuccessRate: biz.avg7DaySuccessRate,
+          gapDays7: biz.gapDays7,
+          missedKeywords5Plus: biz.missedKeywords5Plus,
+          missedKeywords3Plus: biz.missedKeywords3Plus,
+          platformWindows: biz.platformWindows,
+          hasRankData: biz.hasRankData,
+          rankDetectionRate: biz.rankDetectionRate,
+          avgRankPosition: biz.avgRankPosition,
+          improvementPriorities: biz.improvementPriorities,
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setBriefText(data.brief ?? data.content ?? JSON.stringify(data));
+    } catch (e: unknown) {
+      setBriefError(e instanceof Error ? e.message : "Unknown error");
+    } finally {
+      setBriefLoading(false);
+    }
+  };
 
   const platformWindows = biz.platformWindows ?? [];
   const missedKeywords3Plus = biz.missedKeywords3Plus ?? [];
@@ -917,6 +969,100 @@ function BizReportCard({ biz }: { biz: BizRow }) {
               </div>
             </div>
           )}
+
+          {/* IMPROVEMENT PRIORITIES */}
+          {(() => {
+            const priorities: ImprovementPriority[] = biz.improvementPriorities ?? [];
+            const criticals = priorities.filter(p => p.level === "critical");
+            const warnings = priorities.filter(p => p.level === "warning");
+            const opportunities = priorities.filter(p => p.level === "opportunity");
+            const LEVEL_CFG = {
+              critical:    { icon: "🔴", label: "Critical",    color: "border-blue-400/40 bg-blue-500/5 text-blue-700", badge: "bg-blue-500/10 text-blue-700" },
+              warning:     { icon: "🟡", label: "Warning",     color: "border-amber-400/40 bg-amber-500/5 text-amber-700", badge: "bg-amber-500/10 text-amber-700" },
+              opportunity: { icon: "🟢", label: "Opportunity", color: "border-emerald-400/40 bg-emerald-500/5 text-emerald-700", badge: "bg-emerald-500/10 text-emerald-700" },
+            };
+            const sections = [
+              { level: "critical" as const, items: criticals },
+              { level: "warning" as const, items: warnings },
+              { level: "opportunity" as const, items: opportunities },
+            ].filter(s => s.items.length > 0);
+
+            return (
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+                    <Target className="w-3 h-3" /> Improvement Priorities
+                    {biz.hasRankData && biz.rankDetectionRate !== null && (
+                      <span className="ml-2 font-normal normal-case text-muted-foreground">
+                        · Rank Detection: <span className={cn("font-semibold", biz.rankDetectionRate >= 50 ? "text-emerald-600" : biz.rankDetectionRate >= 30 ? "text-amber-600" : "text-blue-600")}>
+                          {biz.rankDetectionRate.toFixed(0)}%
+                        </span>
+                        {biz.avgRankPosition !== null && (
+                          <> · Avg Pos: <span className={cn("font-semibold", biz.avgRankPosition <= 5 ? "text-emerald-600" : biz.avgRankPosition <= 10 ? "text-amber-600" : "text-blue-600")}>
+                            #{biz.avgRankPosition.toFixed(1)}
+                          </span></>
+                        )}
+                      </span>
+                    )}
+                  </p>
+                  <button
+                    onClick={generateBrief}
+                    disabled={briefLoading}
+                    className={cn(
+                      "flex items-center gap-1 text-[10px] rounded px-2 py-1 border transition-colors font-medium",
+                      briefLoading ? "border-border text-muted-foreground cursor-not-allowed"
+                        : "border-primary/30 bg-primary/5 text-primary hover:bg-primary/10"
+                    )}
+                  >
+                    {briefLoading ? <><Loader2 className="w-2.5 h-2.5 animate-spin" /> Generating…</> : <><Sparkles className="w-2.5 h-2.5" /> AI Brief</>}
+                  </button>
+                </div>
+
+                {priorities.length === 0 ? (
+                  <p className="text-[11px] text-emerald-600 flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3 h-3 shrink-0" /> No improvement priorities — performing well.
+                  </p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {sections.map(({ level, items }) => {
+                      const cfg = LEVEL_CFG[level];
+                      return (
+                        <div key={level} className={cn("rounded-lg border p-2.5 space-y-1", cfg.color)}>
+                          <p className="text-[9px] font-bold uppercase tracking-wide">{cfg.icon} {cfg.label} ({items.length})</p>
+                          {items.map((p, i) => (
+                            <div key={i} className="flex items-start gap-1.5">
+                              <span className={cn("text-[8px] font-semibold px-1 py-0.5 rounded shrink-0 mt-0.5", cfg.badge)}>
+                                {p.category.toUpperCase()}
+                              </span>
+                              <div>
+                                <p className="text-[10px] font-semibold text-foreground leading-tight">{p.message}</p>
+                                <p className="text-[9px] text-muted-foreground">{p.detail}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {(briefText || briefError) && (
+                  <div className={cn("mt-2 rounded-lg border p-3", briefError ? "border-blue-400/40 bg-blue-500/5" : "border-primary/20 bg-primary/5")}>
+                    {briefError ? (
+                      <p className="text-[11px] text-blue-600">Failed to generate brief: {briefError}</p>
+                    ) : (
+                      <>
+                        <p className="text-[9px] font-bold uppercase tracking-wide text-primary mb-1 flex items-center gap-1">
+                          <Sparkles className="w-2.5 h-2.5" /> AI Improvement Brief
+                        </p>
+                        <p className="text-[11px] text-foreground leading-relaxed whitespace-pre-wrap">{briefText}</p>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* PREDICTION + WHY + ACTION */}
           <div className={cn("rounded-xl border-2 p-4 space-y-2", pred.ring, pred.bg)}>
@@ -1900,6 +2046,42 @@ export function DailyOverviewPage() {
   const [byDateData, setByDateData] = useState<ByDateData | null>(null);
   const [excludeFirstRun, setExcludeFirstRun] = useState(true);
   const [backlinkReport, setBacklinkReport] = useState<BacklinkActionReport | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryText, setSummaryText] = useState<string | null>(null);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
+
+  const generateDaySummary = async () => {
+    if (!data) return;
+    setSummaryLoading(true);
+    setSummaryError(null);
+    setSummaryText(null);
+    try {
+      const businesses = (data.businesses ?? []).slice(0, 40).map(b => ({
+        bizName: b.bizName,
+        prediction: b.prediction,
+        sessionsToday: b.sessionsToday,
+        targetPerDay: b.targetPerDay,
+        avg7DaySuccessRate: b.avg7DaySuccessRate,
+        gapDays7: b.gapDays7,
+        hasRankData: b.hasRankData,
+        rankDetectionRate: b.rankDetectionRate,
+        avgRankPosition: b.avgRankPosition,
+        improvementPriorities: (b.improvementPriorities ?? []).filter(p => p.level === "critical"),
+      }));
+      const res = await fetch("/api/openai/daily-session-summary", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date: data.asOfDate, businesses }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const result = await res.json();
+      setSummaryText(result.summary ?? result.content ?? JSON.stringify(result));
+    } catch (e: unknown) {
+      setSummaryError(e instanceof Error ? e.message : "Unknown error");
+    } finally {
+      setSummaryLoading(false);
+    }
+  };
 
   const loadForDate = useCallback((date: string) => {
     setLoading(true);
@@ -2039,11 +2221,39 @@ export function DailyOverviewPage() {
                 </Button>
               </div>
             )}
+            <button
+              onClick={generateDaySummary}
+              disabled={summaryLoading}
+              className={cn(
+                "h-8 flex items-center gap-1.5 text-xs rounded-md border px-3 transition-colors font-medium",
+                summaryLoading
+                  ? "border-border text-muted-foreground cursor-not-allowed"
+                  : "border-primary/40 bg-primary/5 text-primary hover:bg-primary/10",
+              )}
+            >
+              {summaryLoading ? <><Loader2 className="w-3 h-3 animate-spin" />Generating…</> : <><Sparkles className="w-3 h-3" />AI Day Summary</>}
+            </button>
             <Button size="sm" variant="outline" className="h-8 text-xs gap-1.5" onClick={load}>
               <RefreshCw className="w-3 h-3" />Refresh
             </Button>
           </div>
         </div>
+
+        {/* ── AI Day Summary output ────────────────────────────────────────── */}
+        {(summaryText || summaryError) && (
+          <div className={cn("rounded-xl border p-4", summaryError ? "border-blue-400/40 bg-blue-500/5" : "border-primary/20 bg-primary/5")}>
+            {summaryError ? (
+              <p className="text-sm text-blue-600">Failed to generate summary: {summaryError}</p>
+            ) : (
+              <>
+                <p className="text-[11px] font-bold uppercase tracking-wide text-primary mb-2 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5" /> AI Day Summary — {fmt(data?.asOfDate ?? "")}
+                </p>
+                <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">{summaryText}</p>
+              </>
+            )}
+          </div>
+        )}
 
         {/* ── Session health tiles ─────────────────────────────────── */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

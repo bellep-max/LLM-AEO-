@@ -7,11 +7,18 @@ import { cn } from "@/lib/utils";
 import {
   Activity, Search, Loader2, AlertCircle, ChevronRight,
   TrendingUp, TrendingDown, Minus, Calendar, RefreshCw, MessageSquare,
-  Link2, AlertTriangle, CheckCircle2, Eye,
+  Link2, AlertTriangle, CheckCircle2, Eye, Sparkles, Target,
 } from "lucide-react";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 type Prediction = "ON_TRACK" | "AT_RISK" | "STABLE" | "TOO_EARLY";
+
+interface ImprovementPriority {
+  level: "critical" | "warning" | "opportunity";
+  category: "sessions" | "keywords" | "platform" | "rank";
+  message: string;
+  detail: string;
+}
 
 interface BacklinkActionItem {
   bizName: string;
@@ -83,13 +90,16 @@ interface BusinessOverview {
   predictionLabel: string;
   predictionEmoji: string;
   nextRankingRunDue: string;
+  hasRankData: boolean;
+  rankDetectionRate: number | null;
+  avgRankPosition: number | null;
+  improvementPriorities: ImprovementPriority[];
 }
 
 interface BusinessDetail extends BusinessOverview {
   allKeywords: string[];
   keywordCoverages: KeywordCoverage[];
   keywordVariants: Record<string, string[]>;
-  // inherited from BusinessOverview: clientName
   keywordsHitToday: string[];
   platformsToday: Record<string, number>;
   why: string;
@@ -175,6 +185,61 @@ function PlatformBlock({ pw }: { pw: PlatformWindow }) {
   );
 }
 
+function ImprovementPrioritiesPanel({ priorities }: { priorities: ImprovementPriority[] }) {
+  if (!priorities || priorities.length === 0) {
+    return (
+      <div className="flex items-center gap-2 text-xs text-emerald-600 py-2">
+        <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+        No improvement priorities — business is performing well across all criteria.
+      </div>
+    );
+  }
+
+  const criticals = priorities.filter(p => p.level === "critical");
+  const warnings = priorities.filter(p => p.level === "warning");
+  const opportunities = priorities.filter(p => p.level === "opportunity");
+
+  const LEVEL_CFG = {
+    critical:    { icon: "🔴", label: "Critical",    color: "border-blue-400/40 bg-blue-500/5", headerColor: "text-blue-700", badgeColor: "bg-blue-500/10 text-blue-700" },
+    warning:     { icon: "🟡", label: "Warning",     color: "border-amber-400/40 bg-amber-500/5", headerColor: "text-amber-700", badgeColor: "bg-amber-500/10 text-amber-700" },
+    opportunity: { icon: "🟢", label: "Opportunity", color: "border-emerald-400/40 bg-emerald-500/5", headerColor: "text-emerald-700", badgeColor: "bg-emerald-500/10 text-emerald-700" },
+  };
+
+  const sections = (
+    [
+      { level: "critical" as const, items: criticals },
+      { level: "warning" as const, items: warnings },
+      { level: "opportunity" as const, items: opportunities },
+    ] as { level: ImprovementPriority["level"]; items: ImprovementPriority[] }[]
+  ).filter(s => s.items.length > 0);
+
+  return (
+    <div className="space-y-2">
+      {sections.map(({ level, items }) => {
+        const cfg = LEVEL_CFG[level];
+        return (
+          <div key={level} className={cn("rounded-lg border p-3 space-y-1.5", cfg.color)}>
+            <p className={cn("text-[10px] font-bold uppercase tracking-wide flex items-center gap-1", cfg.headerColor)}>
+              {cfg.icon} {cfg.label} ({items.length})
+            </p>
+            {items.map((p, i) => (
+              <div key={i} className="flex items-start gap-2">
+                <span className={cn("text-[9px] font-semibold px-1.5 py-0.5 rounded shrink-0 mt-0.5", cfg.badgeColor)}>
+                  {p.category.toUpperCase()}
+                </span>
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-foreground leading-snug">{p.message}</p>
+                  <p className="text-[10px] text-muted-foreground leading-snug">{p.detail}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function TrendBar({ days, target }: { days: DayRecord[]; target: number }) {
   if (!days.length) return null;
   const maxH = Math.max(...days.map((d) => d.total), target, 1);
@@ -201,6 +266,47 @@ function TrendBar({ days, target }: { days: DayRecord[]; target: number }) {
 
 // ── Detail Panel — Section 6 format ───────────────────────────────────────────
 function DetailPanel({ detail, asOfDate }: { detail: BusinessDetail; asOfDate: string }) {
+  const [briefLoading, setBriefLoading] = useState(false);
+  const [briefText, setBriefText] = useState<string | null>(null);
+  const [briefError, setBriefError] = useState<string | null>(null);
+
+  const generateBrief = async () => {
+    setBriefLoading(true);
+    setBriefError(null);
+    setBriefText(null);
+    try {
+      const res = await fetch("/api/openai/business-improvement-brief", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bizName: detail.bizName,
+          clientName: detail.clientName,
+          phase: detail.phase,
+          phaseLabel: detail.phaseLabel,
+          prediction: detail.prediction,
+          avg7DaySessions: detail.avg7DaySessions,
+          targetPerDay: detail.targetPerDay,
+          avg7DaySuccessRate: detail.avg7DaySuccessRate,
+          gapDays7: detail.gapDays7,
+          missedKeywords5Plus: detail.missedKeywords5Plus,
+          missedKeywords3Plus: detail.missedKeywords3Plus,
+          platformWindows: detail.platformWindows,
+          hasRankData: detail.hasRankData,
+          rankDetectionRate: detail.rankDetectionRate,
+          avgRankPosition: detail.avgRankPosition,
+          improvementPriorities: detail.improvementPriorities,
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setBriefText(data.brief ?? data.content ?? JSON.stringify(data));
+    } catch (e: unknown) {
+      setBriefError(e instanceof Error ? e.message : "Unknown error");
+    } finally {
+      setBriefLoading(false);
+    }
+  };
+
   const t = detail.targetPerDay;
   const pred = PRED[detail.prediction];
 
@@ -387,6 +493,84 @@ function DetailPanel({ detail, asOfDate }: { detail: BusinessDetail; asOfDate: s
           </div>
         </section>
       )}
+
+      {/* ── IMPROVEMENT PRIORITIES ───────────────────────────────────── */}
+      <section>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+            <Target className="w-3.5 h-3.5" /> Improvement Priorities
+            {detail.improvementPriorities?.length > 0 && (
+              <span className="text-[9px] font-normal normal-case ml-1">
+                {detail.improvementPriorities.filter(p => p.level === "critical").length > 0 && (
+                  <span className="text-blue-600 font-semibold">
+                    {detail.improvementPriorities.filter(p => p.level === "critical").length} critical
+                  </span>
+                )}
+              </span>
+            )}
+          </h3>
+          <button
+            onClick={generateBrief}
+            disabled={briefLoading}
+            className={cn(
+              "flex items-center gap-1.5 text-[11px] rounded-lg px-3 py-1.5 border transition-colors font-medium",
+              briefLoading
+                ? "border-border text-muted-foreground cursor-not-allowed"
+                : "border-primary/30 bg-primary/5 text-primary hover:bg-primary/10",
+            )}
+          >
+            {briefLoading ? (
+              <><Loader2 className="w-3 h-3 animate-spin" /> Generating…</>
+            ) : (
+              <><Sparkles className="w-3 h-3" /> AI Improvement Brief</>
+            )}
+          </button>
+        </div>
+
+        {/* Rank signals row */}
+        {detail.hasRankData && (
+          <div className="flex items-center gap-3 mb-2 text-[10px] text-muted-foreground">
+            <span>
+              <span className="font-semibold text-foreground">Rank Detection Rate:</span>{" "}
+              <span className={cn("font-mono font-semibold",
+                (detail.rankDetectionRate ?? 0) >= 50 ? "text-emerald-600"
+                : (detail.rankDetectionRate ?? 0) >= 30 ? "text-amber-600"
+                : "text-blue-600"
+              )}>
+                {detail.rankDetectionRate !== null ? `${detail.rankDetectionRate.toFixed(0)}%` : "—"}
+              </span>
+            </span>
+            <span>
+              <span className="font-semibold text-foreground">Avg Rank Position:</span>{" "}
+              <span className={cn("font-mono font-semibold",
+                (detail.avgRankPosition ?? 99) <= 5 ? "text-emerald-600"
+                : (detail.avgRankPosition ?? 99) <= 10 ? "text-amber-600"
+                : "text-blue-600"
+              )}>
+                {detail.avgRankPosition !== null ? `#${detail.avgRankPosition.toFixed(1)}` : "—"}
+              </span>
+            </span>
+          </div>
+        )}
+
+        <ImprovementPrioritiesPanel priorities={detail.improvementPriorities ?? []} />
+
+        {/* AI Brief output */}
+        {(briefText || briefError) && (
+          <div className={cn("mt-3 rounded-lg border p-4", briefError ? "border-blue-400/40 bg-blue-500/5" : "border-primary/20 bg-primary/5")}>
+            {briefError ? (
+              <p className="text-xs text-blue-600">Failed to generate brief: {briefError}</p>
+            ) : (
+              <>
+                <p className="text-[10px] font-bold uppercase tracking-wide text-primary mb-2 flex items-center gap-1.5">
+                  <Sparkles className="w-3 h-3" /> AI Improvement Brief
+                </p>
+                <p className="text-xs text-foreground leading-relaxed whitespace-pre-wrap">{briefText}</p>
+              </>
+            )}
+          </div>
+        )}
+      </section>
 
       {/* ── PREDICTION + WHY + ACTION ─────────────────────────────────── */}
       <section>

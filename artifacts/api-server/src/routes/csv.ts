@@ -123,6 +123,10 @@ router.get("/csv/sessions/overview", (req, res) => {
       predictionLabel: b.predictionLabel,
       predictionEmoji: b.predictionEmoji,
       nextRankingRunDue: b.nextRankingRunDue,
+      hasRankData: b.hasRankData,
+      rankDetectionRate: b.rankDetectionRate,
+      avgRankPosition: b.avgRankPosition,
+      improvementPriorities: b.improvementPriorities,
     }));
     res.json({ businesses: data, total: data.length, asOfDate });
   } catch (err: unknown) {
@@ -872,14 +876,30 @@ router.get("/csv/sessions/by-date", (req, res) => {
     const all = getAllDailyAnalysis();
     const businesses = all.map(biz => {
       const day = biz.recentDays.find(d => d.date === date);
+      const dayRankSessions   = (day as any)?.rankSessions   ?? 0;
+      const dayNoRankSessions = (day as any)?.noRankSessions ?? 0;
+      const dayRankPositions  = (day as any)?.rankPositions  ?? [];
+      const dayHasRankData = (dayRankSessions + dayNoRankSessions) > 0;
+      const dayRankDetectionRate = dayHasRankData ? dayRankSessions / (dayRankSessions + dayNoRankSessions) : null;
+      const dayAvgRankPosition = dayRankPositions.length > 0
+        ? Math.round((dayRankPositions.reduce((s: number, v: number) => s + v, 0) / dayRankPositions.length) * 10) / 10
+        : null;
       return {
-        bizName:      biz.bizName,
-        total:        day?.total        ?? 0,
-        success:      day?.success      ?? 0,
-        successRate:  day?.successRate  ?? 0,
-        platforms:    day?.platforms    ?? {},
-        keywords:     day?.keywords     ?? [],
-        hadSessions:  !!day && day.total > 0,
+        bizName:           biz.bizName,
+        clientName:        biz.clientName,
+        campaignName:      biz.campaignName,
+        prediction:        biz.prediction,
+        predictionEmoji:   biz.predictionEmoji,
+        total:             day?.total       ?? 0,
+        success:           day?.success     ?? 0,
+        successRate:       day?.successRate ?? 0,
+        platforms:         day?.platforms   ?? {},
+        keywords:          day?.keywords    ?? [],
+        hadSessions:       !!day && day.total > 0,
+        hasRankData:       dayHasRankData,
+        rankDetectionRate: dayRankDetectionRate,
+        avgRankPosition:   dayAvgRankPosition,
+        improvementPriorities: biz.improvementPriorities,
       };
     }).filter(b => b.total > 0);
     res.json({ date, businesses, total: businesses.length });
