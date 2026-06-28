@@ -194,13 +194,22 @@ async function createCompletion(
     const result = await client.chat.completions.create({ ...params, stream: false as const });
     return { ...result, _model_used: params.model };
   } catch (primaryErr) {
+    // Stale connection — clear the cached client so the next request gets a fresh one
+    if ((primaryErr as Error).message === "Connection error.") {
+      openai = null;
+    }
     const fallback = await getFallbackClient();
     if (!fallback) throw primaryErr;
     // 2. OpenAI fallback
     const fallbackModel = process.env.OPENAI_FALLBACK_MODEL || "gpt-4o-mini";
     console.warn(`[fallback] Primary LLM failed (${(primaryErr as Error).message?.slice(0, 60)}). Retrying with ${fallbackModel}.`);
-    const result = await fallback.chat.completions.create({ ...params, model: fallbackModel, stream: false as const });
-    return { ...result, _model_used: fallbackModel };
+    try {
+      const result = await fallback.chat.completions.create({ ...params, model: fallbackModel, stream: false as const });
+      return { ...result, _model_used: fallbackModel };
+    } catch (fallbackErr) {
+      openAIFallback = null; // reset fallback cache too on stale connection
+      throw fallbackErr;
+    }
   }
 }
 
