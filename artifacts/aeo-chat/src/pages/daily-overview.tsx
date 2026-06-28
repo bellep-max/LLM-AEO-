@@ -761,8 +761,20 @@ function BizReportCard({ biz }: { biz: BizRow }) {
   const [briefLoading, setBriefLoading] = useState(false);
   const [briefText, setBriefText] = useState<string | null>(null);
   const [briefError, setBriefError] = useState<string | null>(null);
+  const [briefTraceId, setBriefTraceId] = useState<string | null>(null);
+  const [briefRating, setBriefRating] = useState<1 | 0 | null>(null);
   const pred = PRED[biz.prediction];
   const rkCfg = RANK_CFG[biz.rankLabel];
+
+  const submitBriefRating = async (value: 1 | 0) => {
+    if (!briefTraceId) return;
+    setBriefRating(value);
+    await fetch("/api/openai/score", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ traceId: briefTraceId, value, name: "user_rating", comment: value === 1 ? "helpful" : "not helpful" }),
+    }).catch(() => {/* non-critical */});
+  };
 
   const generateBrief = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -794,7 +806,11 @@ function BizReportCard({ biz }: { biz: BizRow }) {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      setBriefText(data.brief ?? data.content ?? JSON.stringify(data));
+      const text = data.brief ?? data.content ?? JSON.stringify(data);
+      setBriefText(text);
+      const tid = data.trace_url ? (data.trace_url as string).split("/trace/")[1] : null;
+      setBriefTraceId(tid);
+      setBriefRating(null);
     } catch (e: unknown) {
       setBriefError(e instanceof Error ? e.message : "Unknown error");
     } finally {
@@ -1052,9 +1068,18 @@ function BizReportCard({ biz }: { biz: BizRow }) {
                       <p className="text-[11px] text-blue-600">Failed to generate brief: {briefError}</p>
                     ) : (
                       <>
-                        <p className="text-[9px] font-bold uppercase tracking-wide text-primary mb-1 flex items-center gap-1">
-                          <Sparkles className="w-2.5 h-2.5" /> AI Improvement Brief
-                        </p>
+                        <div className="flex items-center justify-between mb-1">
+                          <p className="text-[9px] font-bold uppercase tracking-wide text-primary flex items-center gap-1">
+                            <Sparkles className="w-2.5 h-2.5" /> AI Improvement Brief
+                          </p>
+                          {briefTraceId && (
+                            <div className="flex items-center gap-0.5">
+                              <span className="text-[8px] text-muted-foreground mr-0.5">Helpful?</span>
+                              <button onClick={() => submitBriefRating(1)} className={cn("text-xs px-1 rounded", briefRating === 1 ? "bg-emerald-100 text-emerald-700" : "text-muted-foreground hover:bg-muted")}>👍</button>
+                              <button onClick={() => submitBriefRating(0)} className={cn("text-xs px-1 rounded", briefRating === 0 ? "bg-red-100 text-red-700" : "text-muted-foreground hover:bg-muted")}>👎</button>
+                            </div>
+                          )}
+                        </div>
                         <p className="text-[11px] text-foreground leading-relaxed whitespace-pre-wrap">{briefText}</p>
                       </>
                     )}
@@ -2049,6 +2074,8 @@ export function DailyOverviewPage() {
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryText, setSummaryText] = useState<string | null>(null);
   const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [summaryTraceId, setSummaryTraceId] = useState<string | null>(null);
+  const [summaryRating, setSummaryRating] = useState<1 | 0 | null>(null);
 
   const generateDaySummary = async () => {
     if (!data) return;
@@ -2075,12 +2102,26 @@ export function DailyOverviewPage() {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const result = await res.json();
-      setSummaryText(result.summary ?? result.content ?? JSON.stringify(result));
+      const text = result.summary ?? result.content ?? JSON.stringify(result);
+      setSummaryText(text);
+      const tid = result.trace_url ? (result.trace_url as string).split("/trace/")[1] : null;
+      setSummaryTraceId(tid);
+      setSummaryRating(null);
     } catch (e: unknown) {
       setSummaryError(e instanceof Error ? e.message : "Unknown error");
     } finally {
       setSummaryLoading(false);
     }
+  };
+
+  const submitSummaryRating = async (value: 1 | 0) => {
+    if (!summaryTraceId) return;
+    setSummaryRating(value);
+    await fetch("/api/openai/score", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ traceId: summaryTraceId, value, name: "user_rating", comment: value === 1 ? "helpful" : "not helpful" }),
+    }).catch(() => {/* non-critical */});
   };
 
   const loadForDate = useCallback((date: string) => {
@@ -2246,9 +2287,18 @@ export function DailyOverviewPage() {
               <p className="text-sm text-blue-600">Failed to generate summary: {summaryError}</p>
             ) : (
               <>
-                <p className="text-[11px] font-bold uppercase tracking-wide text-primary mb-2 flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5" /> AI Day Summary — {fmt(data?.asOfDate ?? "")}
-                </p>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-primary flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5" /> AI Day Summary — {fmt(data?.asOfDate ?? "")}
+                  </p>
+                  {summaryTraceId && (
+                    <div className="flex items-center gap-1">
+                      <span className="text-[9px] text-muted-foreground mr-1">Helpful?</span>
+                      <button onClick={() => submitSummaryRating(1)} className={cn("text-sm px-1.5 py-0.5 rounded transition-colors", summaryRating === 1 ? "bg-emerald-100 text-emerald-700" : "hover:bg-muted text-muted-foreground")}>👍</button>
+                      <button onClick={() => submitSummaryRating(0)} className={cn("text-sm px-1.5 py-0.5 rounded transition-colors", summaryRating === 0 ? "bg-red-100 text-red-700" : "hover:bg-muted text-muted-foreground")}>👎</button>
+                    </div>
+                  )}
+                </div>
                 <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">{summaryText}</p>
               </>
             )}

@@ -269,6 +269,8 @@ function DetailPanel({ detail, asOfDate }: { detail: BusinessDetail; asOfDate: s
   const [briefLoading, setBriefLoading] = useState(false);
   const [briefText, setBriefText] = useState<string | null>(null);
   const [briefError, setBriefError] = useState<string | null>(null);
+  const [briefTraceId, setBriefTraceId] = useState<string | null>(null);
+  const [briefRating, setBriefRating] = useState<1 | 0 | null>(null);
 
   const generateBrief = async () => {
     setBriefLoading(true);
@@ -299,12 +301,26 @@ function DetailPanel({ detail, asOfDate }: { detail: BusinessDetail; asOfDate: s
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      setBriefText(data.brief ?? data.content ?? JSON.stringify(data));
+      const text = data.brief ?? data.content ?? JSON.stringify(data);
+      setBriefText(text);
+      const traceId = data.trace_url ? (data.trace_url as string).split("/trace/")[1] : null;
+      setBriefTraceId(traceId);
+      setBriefRating(null);
     } catch (e: unknown) {
       setBriefError(e instanceof Error ? e.message : "Unknown error");
     } finally {
       setBriefLoading(false);
     }
+  };
+
+  const submitRating = async (value: 1 | 0) => {
+    if (!briefTraceId) return;
+    setBriefRating(value);
+    await fetch("/api/openai/score", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ traceId: briefTraceId, value, name: "user_rating", comment: value === 1 ? "helpful" : "not helpful" }),
+    }).catch(() => {/* non-critical */});
   };
 
   const t = detail.targetPerDay;
@@ -562,9 +578,26 @@ function DetailPanel({ detail, asOfDate }: { detail: BusinessDetail; asOfDate: s
               <p className="text-xs text-blue-600">Failed to generate brief: {briefError}</p>
             ) : (
               <>
-                <p className="text-[10px] font-bold uppercase tracking-wide text-primary mb-2 flex items-center gap-1.5">
-                  <Sparkles className="w-3 h-3" /> AI Improvement Brief
-                </p>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-primary flex items-center gap-1.5">
+                    <Sparkles className="w-3 h-3" /> AI Improvement Brief
+                  </p>
+                  {briefTraceId && (
+                    <div className="flex items-center gap-1">
+                      <span className="text-[9px] text-muted-foreground mr-1">Helpful?</span>
+                      <button
+                        onClick={() => submitRating(1)}
+                        className={cn("text-sm px-1.5 py-0.5 rounded transition-colors", briefRating === 1 ? "bg-emerald-100 text-emerald-700" : "hover:bg-muted text-muted-foreground")}
+                        title="Helpful"
+                      >👍</button>
+                      <button
+                        onClick={() => submitRating(0)}
+                        className={cn("text-sm px-1.5 py-0.5 rounded transition-colors", briefRating === 0 ? "bg-red-100 text-red-700" : "hover:bg-muted text-muted-foreground")}
+                        title="Not helpful"
+                      >👎</button>
+                    </div>
+                  )}
+                </div>
                 <p className="text-xs text-foreground leading-relaxed whitespace-pre-wrap">{briefText}</p>
               </>
             )}

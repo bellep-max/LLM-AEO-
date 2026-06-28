@@ -80,6 +80,8 @@ async function getLangfuse(): Promise<import("langfuse").Langfuse | null> {
   }
 }
 
+type ScoreEntry = { name: string; value: number; comment?: string };
+
 type TraceOpts = {
   name: string;
   input: Record<string, unknown>;
@@ -89,7 +91,35 @@ type TraceOpts = {
   responseContent: string;
   usage: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | null | undefined;
   startTime: number;
+  maxTokens?: number;
+  scores?: ScoreEntry[];
 };
+
+/** Scores derived purely from response content + token usage — applied to every trace. */
+function universalScores(content: string, usage: TraceOpts["usage"], maxTokens?: number): ScoreEntry[] {
+  const out: ScoreEntry[] = [];
+  const ct = usage?.completion_tokens ?? 0;
+  // token_efficiency: how much of the allowed budget the model used (cut-short = low quality)
+  if (ct > 0 && maxTokens) {
+    out.push({
+      name: "token_efficiency",
+      value: Math.min(1, ct / (maxTokens * 0.85)),
+      comment: `${ct} completion tokens / ${maxTokens} max`,
+    });
+  }
+  // has_structure: bullets, numbered lists, markdown headers in the response
+  out.push({
+    name: "has_structure",
+    value: /^[-*•]|\d+\.|^#{1,3}\s/m.test(content) ? 1 : 0,
+  });
+  // response_non_empty: penalise blank or very short responses
+  out.push({
+    name: "response_non_empty",
+    value: content.trim().length >= 80 ? 1 : Math.max(0, content.trim().length / 80),
+    comment: `${content.trim().length} chars`,
+  });
+  return out;
+}
 
 async function recordTrace(opts: TraceOpts): Promise<string | null> {
   const lf = await getLangfuse();
@@ -113,10 +143,24 @@ async function recordTrace(opts: TraceOpts): Promise<string | null> {
       totalTokens: opts.usage?.total_tokens,
     },
   });
+
+  // Universal automated scores + caller-supplied domain scores
+  const allScores = [
+    ...universalScores(opts.responseContent, opts.usage, opts.maxTokens),
+    ...(opts.scores ?? []),
+  ];
+  for (const s of allScores) {
+    lf.score({ traceId: trace.id, name: s.name, value: s.value, comment: s.comment });
+  }
+
   await lf.flushAsync();
   const base = process.env.LANGFUSE_BASE_URL || process.env.LANGFUSE_HOST || process.env.LANGFUSE_BASEURL || "https://us.cloud.langfuse.com";
   return `${base}/trace/${trace.id}`;
 }
+
+/** Clamp a number to [0, 1]. */
+function clamp01(v: number): number { return Math.max(0, Math.min(1, v)); }
+
 
 async function getOpenAIClient(): Promise<import("openai").OpenAI> {
   if (openai) return openai;
@@ -207,6 +251,27 @@ type BusinessAnalysisResponse = {
 };
 
 const router = Router();
+
+/** POST /openai/score — submit user feedback (thumbs up/down) for an existing trace */
+router.post("/openai/score", async (req, res) => {
+  const { traceId, value, name = "user_rating", comment } = req.body ?? {};
+  if (!traceId || value == null) {
+    res.status(400).json({ error: "traceId and value required" });
+    return;
+  }
+  const lf = await getLangfuse();
+  if (!lf) {
+    res.status(503).json({ error: "Langfuse not configured" });
+    return;
+  }
+  try {
+    lf.score({ traceId, name, value: Number(value), comment: comment ?? undefined });
+    await lf.flushAsync();
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Score failed" });
+  }
+});
 
 router.get("/openai/conversations", async (req, res) => {
   const convs = await db
@@ -442,6 +507,11 @@ router.post("/openai/business-analysis", async (req, res) => {
       responseContent: completion.choices[0]?.message?.content ?? "",
       usage: completion.usage,
       startTime,
+      maxTokens: 3000,
+      scores: [
+        { name: "description_completeness", value: clamp01((description?.length ?? 0) / 500), comment: `${description?.length ?? 0} chars` },
+        { name: "has_business_name", value: businessName ? 1 : 0 },
+      ],
     });
 
     await db.insert(backendLogs).values({
@@ -818,6 +888,16 @@ router.post("/openai/business-audit", async (req, res) => {
       responseContent: completion.choices[0]?.message?.content ?? "",
       usage: completion.usage,
       startTime,
+      maxTokens: 4500,
+      scores: [
+        {
+          name: "data_completeness",
+          value: clamp01([businessDescription, businessSize, businessType, competitorDensity, websiteUrl, location].filter(Boolean).length / 6),
+          comment: "non-empty fields / 6",
+        },
+        { name: "has_website", value: websiteUrl ? 1 : 0 },
+        { name: "has_location", value: location ? 1 : 0 },
+      ],
     });
 
     await db.insert(backendLogs).values({
@@ -953,6 +1033,11 @@ router.post("/openai/generate-backlinks", async (req, res) => {
       responseContent: completion.choices[0]?.message?.content ?? "",
       usage: completion.usage,
       startTime,
+      maxTokens: 6000,
+      scores: [
+        { name: "has_competitors", value: (competitorUrls?.length ?? 0) > 0 ? 1 : 0 },
+        { name: "data_completeness", value: clamp01([businessType, targetKeyword, targetUrl].filter(Boolean).length / 3) },
+      ],
     });
 
     await db.insert(backendLogs).values({
@@ -1073,6 +1158,11 @@ router.post("/openai/generate-link-prospects", async (req, res) => {
       responseContent: completion.choices[0]?.message?.content ?? "",
       usage: completion.usage,
       startTime,
+      maxTokens: 6000,
+      scores: [
+        { name: "has_keyword", value: targetKeyword ? 1 : 0 },
+        { name: "has_url", value: targetUrl ? 1 : 0 },
+      ],
     });
 
     await db.insert(backendLogs).values({
@@ -1167,6 +1257,12 @@ Output ONLY the content itself. No labels. No JSON. No explanation. Just the tex
       responseContent: content,
       usage: completion.usage,
       startTime,
+      maxTokens: 600,
+      scores: [
+        { name: "data_completeness", value: clamp01([platformType, targetUrl, topic, anchorText, writingStyle].filter(Boolean).length / 5) },
+        { name: "has_anchor_text", value: anchorText ? 1 : 0 },
+        { name: "writing_style_specified", value: writingStyle && writingStyle !== "casual" ? 1 : 0 },
+      ],
     });
 
     await db.insert(backendLogs).values({
@@ -1241,6 +1337,11 @@ Output ONLY the modified content.`;
       responseContent: content,
       usage: completion.usage,
       startTime,
+      maxTokens: 800,
+      scores: [
+        { name: "has_anchor_text", value: anchorText ? 1 : 0 },
+        { name: "existing_content_length", value: clamp01(existingContent.length / 500), comment: `${existingContent.length} chars` },
+      ],
     });
 
     await db.insert(backendLogs).values({
@@ -1351,15 +1452,21 @@ router.post("/openai/conversations/:id/messages", async (req, res) => {
 
   const responseTimeMs = Date.now() - startTime;
 
+  const lastUserMsg = parsed.data.content ?? "";
   const chatTraceUrl = await recordTrace({
     name: "chat-completion",
-    input: { conversationId: id, userMessage: parsed.data.content },
+    input: { conversationId: id, userMessage: lastUserMsg },
     output: fullResponse,
     model: CHAT_MODEL,
     messages: chatMessages,
     responseContent: fullResponse,
     usage: totalTokens ? { total_tokens: totalTokens } : null,
     startTime,
+    maxTokens: 8192,
+    scores: [
+      { name: "conversation_depth", value: clamp01(chatMessages.filter(m => m.role === "user").length / 8), comment: `${chatMessages.filter(m => m.role === "user").length} user turns` },
+      { name: "message_length", value: clamp01(lastUserMsg.length / 300), comment: `${lastUserMsg.length} chars` },
+    ],
   });
 
   await db.insert(messages).values({
@@ -1598,6 +1705,8 @@ router.post("/openai/keyword-generator", async (req, res) => {
       return;
     }
 
+    const inputFields = Object.values(req.body ?? {}).filter(v => v != null && String(v).trim() !== "").length;
+    const totalFields = Math.max(Object.keys(req.body ?? {}).length, 1);
     const traceUrl = await recordTrace({
       name: eventName,
       input: req.body,
@@ -1610,6 +1719,10 @@ router.post("/openai/keyword-generator", async (req, res) => {
       responseContent: completion.choices[0]?.message?.content ?? "",
       usage: completion.usage,
       startTime,
+      maxTokens: 4000,
+      scores: [
+        { name: "input_field_coverage", value: clamp01(inputFields / totalFields), comment: `${inputFields}/${totalFields} fields filled` },
+      ],
     });
 
     await db.insert(backendLogs).values({
@@ -1739,6 +1852,12 @@ router.post("/openai/aeo-keyword-strategy", async (req, res) => {
       responseContent: completion.choices[0]?.message?.content ?? "",
       usage: completion.usage,
       startTime,
+      maxTokens: 8000,
+      scores: [
+        { name: "scope_score", value: clamp01((cities.length * categories.length) / 50), comment: `${cities.length} cities × ${categories.length} categories` },
+        { name: "city_count", value: clamp01(cities.length / 10) },
+        { name: "category_count", value: clamp01(categories.length / 5) },
+      ],
     });
 
     await db.insert(backendLogs).values({
@@ -1812,6 +1931,7 @@ Keep answers concise and directly actionable. When you reference keywords, tie t
 
     const content = completion.choices[0]?.message?.content ?? "";
 
+    const userTurns = msgs.filter(m => m.role === "user").length;
     const traceUrl = await recordTrace({
       name: "aeo-strategy-chat",
       input: { cities, categories, period, last_message: msgs[msgs.length - 1]?.content ?? "" },
@@ -1821,6 +1941,13 @@ Keep answers concise and directly actionable. When you reference keywords, tie t
       responseContent: content,
       usage: completion.usage,
       startTime,
+      maxTokens: 2000,
+      scores: [
+        { name: "context_richness", value: clamp01((cities.length + categories.length + userTurns) / 15), comment: `${cities.length}c ${categories.length}cat ${userTurns}turns` },
+        { name: "has_cities", value: cities.length > 0 ? 1 : 0 },
+        { name: "has_categories", value: categories.length > 0 ? 1 : 0 },
+        { name: "conversation_depth", value: clamp01(userTurns / 6), comment: `${userTurns} user turns` },
+      ],
     });
 
     res.json({ content, trace_url: traceUrl });
@@ -1957,6 +2084,10 @@ router.post("/openai/aeo-city-campaigns", async (req, res) => {
       responseContent: content,
       usage: completion.usage,
       startTime,
+      maxTokens: 12000,
+      scores: [
+        { name: "scope_score", value: clamp01(cities.length / 10), comment: `${cities.length} cities` },
+      ],
     });
 
     await db.insert(backendLogs).values({
@@ -2047,6 +2178,7 @@ ${prioritiesSection}`;
       ],
     });
     const content = completion.choices[0]?.message?.content ?? "";
+    const predScore: Record<string, number> = { AT_RISK: 1.0, STABLE: 0.5, TOO_EARLY: 0.3, ON_TRACK: 0.0 };
     const traceUrl = await recordTrace({
       name: "business-improvement-brief",
       input: { bizName, prediction },
@@ -2056,6 +2188,24 @@ ${prioritiesSection}`;
       responseContent: content,
       usage: completion.usage,
       startTime,
+      maxTokens: 800,
+      scores: [
+        // How much this business needs attention (higher = more critical = higher value training signal)
+        { name: "business_needs_attention", value: predScore[prediction] ?? 0.3, comment: prediction },
+        // How rich the input context was (more data = model had more to work with)
+        {
+          name: "data_richness",
+          value: clamp01(
+            (hasRankData ? 0.3 : 0) +
+            ((allKeywords as string[]).length > 0 ? 0.2 : 0) +
+            ((platformWindows as any[]).length > 0 ? 0.2 : 0) +
+            ((improvementPriorities as any[]).length > 0 ? 0.3 : 0)
+          ),
+          comment: `rank:${hasRankData} kw:${(allKeywords as string[]).length} pw:${(platformWindows as any[]).length} pri:${(improvementPriorities as any[]).length}`,
+        },
+        { name: "priority_count_score", value: clamp01((improvementPriorities as any[]).length / 4), comment: `${(improvementPriorities as any[]).length} priorities` },
+        { name: "has_rank_data", value: hasRankData ? 1 : 0 },
+      ],
     });
     res.json({ content, trace_url: traceUrl });
   } catch (err) {
@@ -2078,7 +2228,11 @@ router.post("/openai/daily-session-summary", async (req, res) => {
       ? ` | Citation rate: ${b.rankDetectionRate !== null ? `${Math.round(b.rankDetectionRate * 100)}%` : "?"}, Avg rank: ${b.avgRankPosition ?? "?"}`
       : "";
     const priorities = (b.improvementPriorities as any[] ?? []).slice(0, 2).map((p: any) => `[${p.level}] ${p.message}`).join("; ");
-    return `- ${b.bizName} (${b.prediction}): ${b.total} sessions, ${Math.round(b.successRate * 100)}% success${rankNote}${priorities ? ` | ${priorities}` : ""}`;
+    const sessions = b.sessionsToday ?? b.total ?? "?";
+    const successRate = b.avg7DaySuccessRate ?? b.successRate;
+    const successPct = successRate != null ? `${Math.round(successRate * 100)}%` : "?";
+    const gapNote = b.gapDays7 > 0 ? `, ${b.gapDays7} gap days` : "";
+    return `- ${b.bizName} (${b.prediction}): ${sessions} sessions today${gapNote}, ${successPct} 7d success${rankNote}${priorities ? ` | ${priorities}` : ""}`;
   }).join("\n");
 
   const systemPrompt = `You are an AEO operations manager reviewing daily session data for a portfolio of local businesses. Write a concise daily summary that highlights what needs immediate attention and what is working well. Keep it under 250 words. Use bullet points for the action items section.`;
@@ -2120,6 +2274,12 @@ Write:
       responseContent: content,
       usage: completion.usage,
       startTime,
+      maxTokens: 600,
+      scores: [
+        { name: "at_risk_ratio", value: clamp01(atRisk.length / Math.max(bizList.length, 1)), comment: `${atRisk.length}/${bizList.length} at risk` },
+        { name: "portfolio_coverage", value: clamp01(bizList.length / 40), comment: `${bizList.length} businesses` },
+        { name: "on_track_ratio", value: clamp01(onTrack.length / Math.max(bizList.length, 1)), comment: `${onTrack.length}/${bizList.length} on track` },
+      ],
     });
     res.json({ content, trace_url: traceUrl });
   } catch (err) {
