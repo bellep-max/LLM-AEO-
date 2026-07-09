@@ -161,6 +161,167 @@ async function recordTrace(opts: TraceOpts): Promise<string | null> {
 /** Clamp a number to [0, 1]. */
 function clamp01(v: number): number { return Math.max(0, Math.min(1, v)); }
 
+// ── Output evaluators ──────────────────────────────────────────────────────────
+
+/** Try to parse LLM output text as JSON, stripping markdown fences. */
+function tryParseOutput(content: string): Record<string, unknown> | unknown[] | null {
+  try {
+    const cleaned = content.replace(/^```(?:json)?\s*/im, "").replace(/\s*```\s*$/im, "").trim();
+    const parsed = JSON.parse(cleaned);
+    if (typeof parsed === "object" && parsed !== null) return parsed as Record<string, unknown> | unknown[];
+  } catch { /* not JSON */ }
+  return null;
+}
+
+/** Scores for any trace that expects a JSON response. */
+function jsonStructureScores(content: string): ScoreEntry[] {
+  const parsed = tryParseOutput(content);
+  const isJson = parsed !== null;
+  const keyCount = isJson && !Array.isArray(parsed) ? Object.keys(parsed as object).length : isJson ? (parsed as unknown[]).length : 0;
+  const hasArrays = isJson && !Array.isArray(parsed)
+    ? Object.values(parsed as object).some(v => Array.isArray(v))
+    : isJson;
+  return [
+    { name: "json_valid", value: isJson ? 1 : 0, comment: isJson ? `${keyCount} top-level keys` : "output is not valid JSON" },
+    { name: "json_field_coverage", value: clamp01(keyCount / 5), comment: `${keyCount} keys` },
+    { name: "json_has_nested_arrays", value: hasArrays ? 1 : 0 },
+  ];
+}
+
+/** Scores for business-analysis traces. */
+function aeoAnalysisScores(content: string): ScoreEntry[] {
+  const raw = tryParseOutput(content);
+  const data = (raw && !Array.isArray(raw) && (raw as Record<string, unknown>).data
+    ? (raw as Record<string, unknown>).data
+    : raw) as Record<string, unknown> | null;
+  if (!data || Array.isArray(data)) return [{ name: "analysis_parse_ok", value: 0, comment: "could not parse analysis JSON" }];
+
+  const keywords = Array.isArray(data.keywords) ? data.keywords as Record<string, unknown>[] : [];
+  const aeoScore = data.aeo_score as Record<string, unknown> | undefined;
+  const aeoFields = ["overall", "answer_first", "citability", "clarity", "structured_data"];
+  const aeoInRange = aeoScore
+    ? aeoFields.every(f => typeof aeoScore[f] === "number" && (aeoScore[f] as number) >= 1 && (aeoScore[f] as number) <= 10)
+    : false;
+  const kwScores = keywords.map(k => k.score).filter((s): s is number => typeof s === "number");
+  const avgKwScore = kwScores.length ? kwScores.reduce((a, b) => a + b, 0) / kwScores.length : 0;
+  const requiredKwFields = ["phrase", "intent", "priority", "score", "best_prompt", "prompt_score"];
+  const keywordsComplete = keywords.length > 0 && keywords.every(k => requiredKwFields.every(f => f in k));
+  const backlinks = Array.isArray(data.backlinks) ? data.backlinks : [];
+
+  return [
+    { name: "keyword_count_valid", value: keywords.length === 10 ? 1 : 0, comment: `${keywords.length}/10 keywords` },
+    { name: "keyword_coverage", value: clamp01(keywords.length / 10), comment: `${keywords.length} keywords` },
+    { name: "aeo_scores_in_range", value: aeoInRange ? 1 : 0 },
+    { name: "keywords_complete", value: keywordsComplete ? 1 : 0 },
+    { name: "avg_keyword_score", value: clamp01(avgKwScore / 100), comment: `avg ${avgKwScore.toFixed(1)}/100` },
+    { name: "has_recommended_prompt", value: data.recommended_prompt ? 1 : 0 },
+    { name: "backlink_coverage", value: clamp01((backlinks as unknown[]).length / 5), comment: `${(backlinks as unknown[]).length}/5 backlinks` },
+  ];
+}
+
+/** Scores for business-audit traces. */
+function aeoAuditScores(content: string): ScoreEntry[] {
+  const raw = tryParseOutput(content);
+  const data = (raw && !Array.isArray(raw) && (raw as Record<string, unknown>).data
+    ? (raw as Record<string, unknown>).data
+    : raw) as Record<string, unknown> | null;
+  if (!data || Array.isArray(data)) return [{ name: "audit_parse_ok", value: 0, comment: "could not parse audit JSON" }];
+
+  const exec = data.executive_summary as Record<string, unknown> | undefined;
+  const ars = exec?.ars;
+  const arsStatus = exec?.ars_status;
+  const keywords = Array.isArray(data.keywords) ? data.keywords : [];
+  const pqs = data.pqs as Record<string, unknown> | undefined;
+  const recs = Array.isArray(data.recommendations) ? data.recommendations : [];
+
+  return [
+    { name: "ars_valid", value: typeof ars === "number" && ars >= 0 && ars <= 100 ? 1 : 0, comment: `ARS: ${ars}` },
+    { name: "ars_status_valid", value: ["Green", "Amber", "Red"].includes(String(arsStatus)) ? 1 : 0, comment: String(arsStatus) },
+    { name: "has_executive_summary", value: typeof exec?.summary === "string" && (exec.summary as string).length > 20 ? 1 : 0 },
+    { name: "audit_keyword_count", value: clamp01((keywords as unknown[]).length / 7), comment: `${(keywords as unknown[]).length} keywords` },
+    { name: "pqs_valid", value: typeof pqs?.pqs_score === "number" ? 1 : 0, comment: `PQS: ${pqs?.pqs_score}` },
+    { name: "recommendation_count", value: clamp01((recs as unknown[]).length / 4), comment: `${(recs as unknown[]).length} recommendations` },
+  ];
+}
+
+/** Scores for generate-backlinks traces. */
+function backlinkOutputScores(content: string): ScoreEntry[] {
+  const raw = tryParseOutput(content);
+  const data = (raw && !Array.isArray(raw) && (raw as Record<string, unknown>).data
+    ? (raw as Record<string, unknown>).data
+    : raw) as Record<string, unknown> | null;
+  if (!data || Array.isArray(data)) return [{ name: "backlinks_parse_ok", value: 0 }];
+
+  const links = Array.isArray(data.self_creatable_backlinks) ? data.self_creatable_backlinks : [];
+  const audit = data.hallucination_self_audit as Record<string, unknown> | undefined;
+  const confidence = typeof audit?.overall_confidence_score === "number" ? audit.overall_confidence_score as number : null;
+
+  return [
+    { name: "backlink_count", value: clamp01((links as unknown[]).length / 10), comment: `${(links as unknown[]).length} backlinks` },
+    { name: "hallucination_confidence", value: confidence !== null ? clamp01(confidence) : 0, comment: confidence !== null ? `confidence: ${confidence}` : "missing" },
+    { name: "has_self_audit", value: audit ? 1 : 0 },
+    { name: "has_strategy_summary", value: typeof data.strategy_summary === "string" && (data.strategy_summary as string).length > 20 ? 1 : 0 },
+  ];
+}
+
+/** Scores for generate-link-prospects traces. */
+function linkProspectOutputScores(content: string): ScoreEntry[] {
+  const raw = tryParseOutput(content);
+  const data = (raw && !Array.isArray(raw) && (raw as Record<string, unknown>).data
+    ? (raw as Record<string, unknown>).data
+    : raw) as Record<string, unknown> | null;
+  if (!data || Array.isArray(data)) return [{ name: "prospects_parse_ok", value: 0 }];
+
+  const prospects = Array.isArray(data.prospects) ? data.prospects : [];
+  const audit = data.hallucination_self_audit as Record<string, unknown> | undefined;
+  const confidence = typeof audit?.overall_confidence_score === "number" ? audit.overall_confidence_score as number : null;
+  const highCertainty = typeof audit?.prospects_with_high_certainty === "number" ? audit.prospects_with_high_certainty as number : 0;
+
+  return [
+    { name: "prospect_count", value: clamp01((prospects as unknown[]).length / 10), comment: `${(prospects as unknown[]).length} prospects` },
+    { name: "hallucination_confidence", value: confidence !== null ? clamp01(confidence) : 0, comment: confidence !== null ? `confidence: ${confidence}` : "missing" },
+    { name: "high_certainty_ratio", value: (prospects as unknown[]).length > 0 ? clamp01(highCertainty / (prospects as unknown[]).length) : 0 },
+    { name: "has_self_audit", value: audit ? 1 : 0 },
+  ];
+}
+
+/** Scores for chat-completion and aeo-strategy-chat traces. */
+function chatQualityScores(content: string, inputText: string): ScoreEntry[] {
+  const len = content.trim().length;
+  const lengthScore = len < 50 ? len / 50 : len <= 3000 ? 1 : clamp01(1 - (len - 3000) / 5000);
+  const inputWords = new Set(inputText.toLowerCase().split(/\W+/).filter(w => w.length > 4));
+  const outputWords = content.toLowerCase().split(/\W+/).filter(w => w.length > 4);
+  const echoRatio = outputWords.length > 0 ? outputWords.filter(w => inputWords.has(w)).length / outputWords.length : 0;
+  const sentences = content.split(/[.!?]+/).filter(s => s.trim().length > 10).length;
+
+  return [
+    { name: "chat_length_score", value: lengthScore, comment: `${len} chars` },
+    { name: "not_echoing_input", value: echoRatio < 0.7 ? 1 : 0, comment: `${(echoRatio * 100).toFixed(0)}% word overlap` },
+    { name: "aeo_domain_relevant", value: /\b(aeo|seo|keyword|prompt|ai answer|citation|structured|schema|featured snippet|answer engine)\b/i.test(content) ? 1 : 0 },
+    { name: "sentence_completeness", value: clamp01(sentences / 5), comment: `${sentences} sentences` },
+  ];
+}
+
+/** Scores for aeo-keyword-strategy traces. */
+function aeoKeywordStrategyScores(content: string): ScoreEntry[] {
+  const raw = tryParseOutput(content);
+  const data = raw && !Array.isArray(raw) ? raw as Record<string, unknown> : null;
+  if (!data) return [{ name: "kw_strategy_parse_ok", value: 0 }];
+
+  const cities = Array.isArray(data.cities) ? data.cities : [];
+  const keywords = Array.isArray(data.keywords) ? data.keywords : [];
+  const strategy = data.strategy as Record<string, unknown> | undefined;
+  const totalItems = (keywords as Record<string, unknown>[]).reduce((sum, g) => sum + (Array.isArray(g.items) ? (g.items as unknown[]).length : 0), 0);
+
+  return [
+    { name: "cities_present", value: (cities as unknown[]).length > 0 ? 1 : 0, comment: `${(cities as unknown[]).length} cities` },
+    { name: "keyword_groups_present", value: (keywords as unknown[]).length > 0 ? 1 : 0, comment: `${(keywords as unknown[]).length} groups` },
+    { name: "total_keyword_items", value: clamp01(totalItems / 30), comment: `${totalItems} total keywords` },
+    { name: "has_strategy_section", value: strategy && typeof strategy.big_city_rationale === "string" ? 1 : 0 },
+    { name: "has_aeo_tips", value: Array.isArray(strategy?.aeo_tips) && (strategy!.aeo_tips as unknown[]).length > 0 ? 1 : 0 },
+  ];
+}
+
 
 async function getOpenAIClient(): Promise<import("openai").OpenAI> {
   if (openai) return openai;
@@ -520,6 +681,8 @@ router.post("/openai/business-analysis", async (req, res) => {
       scores: [
         { name: "description_completeness", value: clamp01((description?.length ?? 0) / 500), comment: `${description?.length ?? 0} chars` },
         { name: "has_business_name", value: businessName ? 1 : 0 },
+        ...jsonStructureScores(completion.choices[0]?.message?.content ?? ""),
+        ...aeoAnalysisScores(completion.choices[0]?.message?.content ?? ""),
       ],
     });
 
@@ -906,6 +1069,8 @@ router.post("/openai/business-audit", async (req, res) => {
         },
         { name: "has_website", value: websiteUrl ? 1 : 0 },
         { name: "has_location", value: location ? 1 : 0 },
+        ...jsonStructureScores(completion.choices[0]?.message?.content ?? ""),
+        ...aeoAuditScores(completion.choices[0]?.message?.content ?? ""),
       ],
     });
 
@@ -1046,6 +1211,8 @@ router.post("/openai/generate-backlinks", async (req, res) => {
       scores: [
         { name: "has_competitors", value: (competitorUrls?.length ?? 0) > 0 ? 1 : 0 },
         { name: "data_completeness", value: clamp01([businessType, targetKeyword, targetUrl].filter(Boolean).length / 3) },
+        ...jsonStructureScores(completion.choices[0]?.message?.content ?? ""),
+        ...backlinkOutputScores(completion.choices[0]?.message?.content ?? ""),
       ],
     });
 
@@ -1171,6 +1338,8 @@ router.post("/openai/generate-link-prospects", async (req, res) => {
       scores: [
         { name: "has_keyword", value: targetKeyword ? 1 : 0 },
         { name: "has_url", value: targetUrl ? 1 : 0 },
+        ...jsonStructureScores(completion.choices[0]?.message?.content ?? ""),
+        ...linkProspectOutputScores(completion.choices[0]?.message?.content ?? ""),
       ],
     });
 
@@ -1271,6 +1440,7 @@ Output ONLY the content itself. No labels. No JSON. No explanation. Just the tex
         { name: "data_completeness", value: clamp01([platformType, targetUrl, topic, anchorText, writingStyle].filter(Boolean).length / 5) },
         { name: "has_anchor_text", value: anchorText ? 1 : 0 },
         { name: "writing_style_specified", value: writingStyle && writingStyle !== "casual" ? 1 : 0 },
+        ...jsonStructureScores(completion.choices[0]?.message?.content ?? ""),
       ],
     });
 
@@ -1350,6 +1520,7 @@ Output ONLY the modified content.`;
       scores: [
         { name: "has_anchor_text", value: anchorText ? 1 : 0 },
         { name: "existing_content_length", value: clamp01(existingContent.length / 500), comment: `${existingContent.length} chars` },
+        ...jsonStructureScores(completion.choices[0]?.message?.content ?? ""),
       ],
     });
 
@@ -1475,6 +1646,7 @@ router.post("/openai/conversations/:id/messages", async (req, res) => {
     scores: [
       { name: "conversation_depth", value: clamp01(chatMessages.filter(m => m.role === "user").length / 8), comment: `${chatMessages.filter(m => m.role === "user").length} user turns` },
       { name: "message_length", value: clamp01(lastUserMsg.length / 300), comment: `${lastUserMsg.length} chars` },
+      ...chatQualityScores(fullResponse, lastUserMsg),
     ],
   });
 
@@ -1731,6 +1903,7 @@ router.post("/openai/keyword-generator", async (req, res) => {
       maxTokens: 4000,
       scores: [
         { name: "input_field_coverage", value: clamp01(inputFields / totalFields), comment: `${inputFields}/${totalFields} fields filled` },
+        ...jsonStructureScores(completion.choices[0]?.message?.content ?? ""),
       ],
     });
 
@@ -1866,6 +2039,8 @@ router.post("/openai/aeo-keyword-strategy", async (req, res) => {
         { name: "scope_score", value: clamp01((cities.length * categories.length) / 50), comment: `${cities.length} cities × ${categories.length} categories` },
         { name: "city_count", value: clamp01(cities.length / 10) },
         { name: "category_count", value: clamp01(categories.length / 5) },
+        ...jsonStructureScores(completion.choices[0]?.message?.content ?? ""),
+        ...aeoKeywordStrategyScores(completion.choices[0]?.message?.content ?? ""),
       ],
     });
 
@@ -1956,6 +2131,7 @@ Keep answers concise and directly actionable. When you reference keywords, tie t
         { name: "has_cities", value: cities.length > 0 ? 1 : 0 },
         { name: "has_categories", value: categories.length > 0 ? 1 : 0 },
         { name: "conversation_depth", value: clamp01(userTurns / 6), comment: `${userTurns} user turns` },
+        ...chatQualityScores(content, msgs[msgs.length - 1]?.content ?? ""),
       ],
     });
 
@@ -2096,6 +2272,7 @@ router.post("/openai/aeo-city-campaigns", async (req, res) => {
       maxTokens: 12000,
       scores: [
         { name: "scope_score", value: clamp01(cities.length / 10), comment: `${cities.length} cities` },
+        ...jsonStructureScores(completion.choices[0]?.message?.content ?? ""),
       ],
     });
 

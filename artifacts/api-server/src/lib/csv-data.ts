@@ -200,8 +200,8 @@ function loadRankings(): BusinessRankSummary[] {
   const rows = parseCSV(RANKINGS_CSV);
   const map = new Map<string, RankRun[]>();
   for (const row of rows) {
-    const biz = row["biz_name"]?.trim();
-    if (biz && archived.has(biz)) continue;
+    const biz = resolveBizName(row["biz_name"]?.trim() ?? "");
+    if (!biz || archived.has(biz)) continue;
     const platform = normPlatform(row["platform"] ?? "");
     const keyword = row["keyword"]?.trim();
     const date = row["date"]?.trim()?.slice(0, 10);
@@ -572,7 +572,7 @@ function loadKeywordVariants(): VariantMap {
   for (const file of files) {
     const rows = parseCSV(resolve(DAILY_CSV_DIR, file));
     for (const row of rows) {
-      const biz = row["biz_name"]?.trim();
+      const biz = resolveBizName(row["biz_name"]?.trim() ?? "");
       const kw  = (row["keyword"] ?? row["keyword_text"] ?? "").trim();
       const variant = (row["keyword_variant"] ?? "").trim();
       if (!biz || !kw || !variant || variant === kw) continue;
@@ -592,6 +592,27 @@ function getVariantMap(): VariantMap {
 
 let _dailyAnalysis: BusinessDailyAnalysis[] | null = null;
 
+/**
+ * Name aliases — maps old/inconsistent pipeline biz_names to the canonical current name.
+ * Reason: the pipeline occasionally renames businesses mid-stream (capitalisation changes,
+ * location suffix dropped, etc.). Without this map the server treats them as separate
+ * businesses and the old name appears "silent" even though the campaign is still running.
+ */
+const BIZ_NAME_ALIASES: Record<string, string> = {
+  // Leo Lapuerta — pipeline dropped location suffixes for these 4 locations after Jun 13.
+  // Campaigns 9/10/11/12 still run — just under the generic name from Jun 15 onward.
+  "Leo Lapuerta, MD Plastic Surgery, 14503 Houston": "Leo Lapuerta, MD Plastic Surgery",
+  "Leo Lapuerta, MD Plastic Surgery, 1919 Houston":  "Leo Lapuerta, MD Plastic Surgery",
+  "Leo Lapuerta, MD Plastic Surgery, Katy":          "Leo Lapuerta, MD Plastic Surgery",
+  "Leo Lapuerta, MD Plastic Surgery, Webster":       "Leo Lapuerta, MD Plastic Surgery",
+  // My Eye Guy Coffee Guy — pipeline changed capitalisation from Jun 15 onward.
+  "My Eye Guy Coffee Guy": "My EYE GUY Coffee Guy",
+};
+
+function resolveBizName(raw: string): string {
+  return BIZ_NAME_ALIASES[raw] ?? raw;
+}
+
 function loadDailyAnalysis(): BusinessDailyAnalysis[] {
   const archived = loadArchiveSet();
 
@@ -608,8 +629,10 @@ function loadDailyAnalysis(): BusinessDailyAnalysis[] {
   const seenTimestamps = new Set<string>();
 
   function processRow(row: Record<string, string>, canonicalDate: string | null) {
-    const biz = row["biz_name"]?.trim();
-    if (!biz || (archived.has(biz))) return;
+    const rawBiz = row["biz_name"]?.trim();
+    if (!rawBiz) return;
+    const biz = resolveBizName(rawBiz);
+    if (archived.has(biz)) return;
 
     // Filename date wins for daily CSVs; fall back to date column for SESSIONS_CSV
     const date = canonicalDate ?? row["date"]?.slice(0, 10);
@@ -1390,11 +1413,11 @@ function loadAEOAnalysis(): BusinessAEOAnalysis[] {
 
   for (const row of rows) {
     if (row["status"]?.trim() !== "success") continue;
-    const biz      = row["biz_name"]?.trim();
-    if (biz && archived.has(biz)) continue;
+    const biz      = resolveBizName(row["biz_name"]?.trim() ?? "");
+    if (!biz || archived.has(biz)) continue;
     const platform = normPlatform(row["platform"] ?? "");
     const date     = row["date"]?.trim()?.slice(0, 10);
-    if (!biz || !platform || !date || date.length !== 10) continue;
+    if (!platform || !date || date.length !== 10) continue;
 
     const rawPos   = row["ranking_position"];
     const rawTotal = row["ranking_total"];
@@ -1671,7 +1694,7 @@ export function getBacklinkActionItems(date: string): BacklinkActionReport {
   // Group by business
   const bizMap = new Map<string, { clientName: string; sessions: Array<{ platform: string; found: boolean; url: string }> }>();
   for (const r of injected) {
-    const biz = r["biz_name"]?.trim();
+    const biz = resolveBizName(r["biz_name"]?.trim() ?? "");
     if (!biz) continue;
     const clientName = bizClientLookup.get(biz) ?? r["client_name"]?.trim() ?? "";
     if (!bizMap.has(biz)) bizMap.set(biz, { clientName, sessions: [] });

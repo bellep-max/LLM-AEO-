@@ -18,6 +18,7 @@ import {
   type PerformanceTier,
   type AEOFlagType,
 } from "../lib/csv-data.js";
+import { isFreeTrial } from "../lib/free-trial-businesses.js";
 
 const router = Router();
 
@@ -165,9 +166,19 @@ router.get("/csv/sessions/detail", (req, res) => {
 router.get("/csv/daily/overview", (req, res) => {
   try {
     const date = req.query["date"] as string | undefined;
-    const data = date && /^\d{4}-\d{2}-\d{2}$/.test(date)
+    const raw = date && /^\d{4}-\d{2}-\d{2}$/.test(date)
       ? getDailyOverviewForDate(date)
       : getDailyOverview();
+
+    // Strip free-trial businesses from every per-business array
+    const data = {
+      ...raw,
+      businesses:      raw.businesses.filter(b => !isFreeTrial(b.bizName)),
+      atRiskBusinesses: raw.atRiskBusinesses.filter(b => !isFreeTrial(b.bizName)),
+      rankAlerts:      raw.rankAlerts.filter(b => !isFreeTrial(b.bizName)),
+      keywordRotationGap: raw.keywordRotationGap.filter(b => !isFreeTrial(b.bizName)),
+    };
+
     res.json(data);
   } catch (err: unknown) {
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
@@ -179,7 +190,7 @@ router.get("/csv/daily/overview", (req, res) => {
 /** GET /csv/aeo/overview — all businesses with health scores, tiers, and flags */
 router.get("/csv/aeo/overview", (_req, res) => {
   try {
-    const all = getAllAEOAnalysis();
+    const all = getAllAEOAnalysis().filter(b => !isFreeTrial(b.bizName));
 
     // Tier counts
     const tiers: Record<PerformanceTier, number> = {
@@ -874,34 +885,36 @@ router.get("/csv/sessions/by-date", (req, res) => {
       res.status(400).json({ error: "date query param required (YYYY-MM-DD)" }); return;
     }
     const all = getAllDailyAnalysis();
-    const businesses = all.map(biz => {
-      const day = biz.recentDays.find(d => d.date === date);
-      const dayRankSessions   = (day as any)?.rankSessions   ?? 0;
-      const dayNoRankSessions = (day as any)?.noRankSessions ?? 0;
-      const dayRankPositions  = (day as any)?.rankPositions  ?? [];
-      const dayHasRankData = (dayRankSessions + dayNoRankSessions) > 0;
-      const dayRankDetectionRate = dayHasRankData ? dayRankSessions / (dayRankSessions + dayNoRankSessions) : null;
-      const dayAvgRankPosition = dayRankPositions.length > 0
-        ? Math.round((dayRankPositions.reduce((s: number, v: number) => s + v, 0) / dayRankPositions.length) * 10) / 10
-        : null;
-      return {
-        bizName:           biz.bizName,
-        clientName:        biz.clientName,
-        campaignName:      biz.campaignName,
-        prediction:        biz.prediction,
-        predictionEmoji:   biz.predictionEmoji,
-        total:             day?.total       ?? 0,
-        success:           day?.success     ?? 0,
-        successRate:       day?.successRate ?? 0,
-        platforms:         day?.platforms   ?? {},
-        keywords:          day?.keywords    ?? [],
-        hadSessions:       !!day && day.total > 0,
-        hasRankData:       dayHasRankData,
-        rankDetectionRate: dayRankDetectionRate,
-        avgRankPosition:   dayAvgRankPosition,
-        improvementPriorities: biz.improvementPriorities,
-      };
-    }).filter(b => b.total > 0);
+    const businesses = all
+      .filter(biz => !isFreeTrial(biz.bizName))
+      .map(biz => {
+        const day = biz.recentDays.find(d => d.date === date);
+        const dayRankSessions   = (day as any)?.rankSessions   ?? 0;
+        const dayNoRankSessions = (day as any)?.noRankSessions ?? 0;
+        const dayRankPositions  = (day as any)?.rankPositions  ?? [];
+        const dayHasRankData = (dayRankSessions + dayNoRankSessions) > 0;
+        const dayRankDetectionRate = dayHasRankData ? dayRankSessions / (dayRankSessions + dayNoRankSessions) : null;
+        const dayAvgRankPosition = dayRankPositions.length > 0
+          ? Math.round((dayRankPositions.reduce((s: number, v: number) => s + v, 0) / dayRankPositions.length) * 10) / 10
+          : null;
+        return {
+          bizName:           biz.bizName,
+          clientName:        biz.clientName,
+          campaignName:      biz.campaignName,
+          prediction:        biz.prediction,
+          predictionEmoji:   biz.predictionEmoji,
+          total:             day?.total       ?? 0,
+          success:           day?.success     ?? 0,
+          successRate:       day?.successRate ?? 0,
+          platforms:         day?.platforms   ?? {},
+          keywords:          day?.keywords    ?? [],
+          hadSessions:       !!day && day.total > 0,
+          hasRankData:       dayHasRankData,
+          rankDetectionRate: dayRankDetectionRate,
+          avgRankPosition:   dayAvgRankPosition,
+          improvementPriorities: biz.improvementPriorities,
+        };
+      }).filter(b => b.total > 0);
     res.json({ date, businesses, total: businesses.length });
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
