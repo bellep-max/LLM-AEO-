@@ -1,7 +1,8 @@
 import { readFileSync, writeFileSync } from "fs";
-import { resolve } from "path";
+import { resolve, basename } from "path";
 
 import { readdirSync, existsSync } from "fs";
+import { isFreeTrial, NO_SESSIONS_YET } from "./free-trial-businesses.js";
 
 const DATA_DIR = process.env.AEO_DATA_DIR ?? resolve(process.cwd(), "data");
 const RANKINGS_CSV = process.env.RANKINGS_CSV_PATH ?? resolve(DATA_DIR, "rankings.csv");
@@ -27,7 +28,7 @@ export function archiveBusiness(bizName: string): void {
   const set = loadArchiveSet();
   set.add(bizName);
   writeFileSync(ARCHIVE_FILE, JSON.stringify({ archived: [...set].sort() }, null, 2));
-  _rankings = null; _dailyAnalysis = null; _aeoAnalysis = null; _variantMap = null;
+  _rankings = null; _dailyAnalysis = null; _aeoAnalysis = null; _variantMap = null; _campaignPlatformActuals = null;
 }
 
 export function reactivateBusiness(bizName: string): boolean {
@@ -35,12 +36,12 @@ export function reactivateBusiness(bizName: string): boolean {
   if (!set.has(bizName)) return false;
   set.delete(bizName);
   writeFileSync(ARCHIVE_FILE, JSON.stringify({ archived: [...set].sort() }, null, 2));
-  _rankings = null; _dailyAnalysis = null; _aeoAnalysis = null; _variantMap = null;
+  _rankings = null; _dailyAnalysis = null; _aeoAnalysis = null; _variantMap = null; _campaignPlatformActuals = null;
   return true;
 }
 
 export function clearCache(): void {
-  _rankings = null; _dailyAnalysis = null; _aeoAnalysis = null; _variantMap = null;
+  _rankings = null; _dailyAnalysis = null; _aeoAnalysis = null; _variantMap = null; _campaignPlatformActuals = null;
 }
 
 // ── CSV parser ─────────────────────────────────────────────────────────────────
@@ -145,6 +146,30 @@ function worstLabel(labels: RankLabel[]): RankLabel {
   return labels.reduce((w, l) => (labelPri(l) < labelPri(w) ? l : w));
 }
 
+// Net trend across a business's tracked keywords — unlike worstLabel (which flags a business red
+// if ANY single keyword out of many dropped), this weighs declining keywords against improving
+// ones directly; "flat" keywords only decide the outcome when drop/improve momentum is tied (most
+// keywords sit within-tier day to day, so a flat-inclusive plurality vote would wash out real
+// minority-but-real drift instead of surfacing it).
+// Used only for the daily-overview headline chart; per-business badges/alerts still use worstLabel
+// so a single concerning keyword still surfaces there.
+function netTrendLabel(labels: RankLabel[]): RankLabel {
+  const comparable = labels.filter((l) => l !== "BASELINE");
+  if (!comparable.length) return "BASELINE";
+  let severeDrop = 0, mildDrop = 0, mildUp = 0, severeUp = 0;
+  for (const l of comparable) {
+    if (l === "SUDDEN_DROP" || l === "NOT_FOUND_CRITICAL") severeDrop++;
+    else if (l === "STEADY_DROP") mildDrop++;
+    else if (l === "SUDDEN_IMPROVEMENT" || l === "REAPPEARED") severeUp++;
+    else if (l === "STEADY_IMPROVEMENT") mildUp++;
+  }
+  const dropTotal = severeDrop + mildDrop;
+  const upTotal = mildUp + severeUp;
+  if (dropTotal === upTotal) return "NO_CHANGE"; // includes the all-flat case (both 0)
+  if (dropTotal > upTotal) return severeDrop >= mildDrop ? "SUDDEN_DROP" : "STEADY_DROP";
+  return severeUp >= mildUp ? "SUDDEN_IMPROVEMENT" : "STEADY_IMPROVEMENT";
+}
+
 function normalizePos(raw: number | null): number | null {
   if (raw === null || raw === 0 || (typeof raw === "number" && isNaN(raw))) return null;
   return raw;
@@ -200,7 +225,7 @@ function loadRankings(): BusinessRankSummary[] {
   const rows = parseCSV(RANKINGS_CSV);
   const map = new Map<string, RankRun[]>();
   for (const row of rows) {
-    const biz = resolveBizName(row["biz_name"]?.trim() ?? "");
+    const biz = resolveBizNameForRow(row["biz_name"]?.trim() ?? "", row["campaign_id"]?.trim() ?? "");
     if (!biz || archived.has(biz)) continue;
     const platform = normPlatform(row["platform"] ?? "");
     const keyword = row["keyword"]?.trim();
@@ -379,6 +404,44 @@ function extractDateFromFilename(filename: string): string | null {
   const month = MONTH_MAP[m[1].toLowerCase()];
   if (!month) return null;
   return `2026-${month}-${m[2]}`;
+}
+
+// Recursively collect .csv files under a directory (daily CSVs have been reorganized into
+// dated subfolders like "csv/June Folder/" — a flat readdirSync silently finds nothing there).
+function listCsvFilesRecursive(dir: string): string[] {
+  let out: string[] = [];
+  let entries;
+  try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return out; }
+  for (const e of entries) {
+    const full = resolve(dir, e.name);
+    if (e.isDirectory()) out = out.concat(listCsvFilesRecursive(full));
+    else if (e.isFile() && e.name.toLowerCase().endsWith(".csv")) out.push(full);
+  }
+  return out;
+}
+
+// Classifies a daily CSV filename and determines whether to trust its filename-encoded date.
+//
+// 2026-07-20 investigation history (kept so this isn't re-litigated from scratch): the 5
+// "daily_2026-06-2[6-9]/30_success.csv" files each have a `date`/`timestamp` column that disagrees
+// with their own filename by 1-2 days. Checked all 5 together by raw timestamp: they form one
+// continuous, gapless stream (median gap between consecutive rows 33s, only one >10min gap per
+// file) running from 2026-06-28T03:34:46Z through 2026-07-02T03:19:28Z, with zero activity
+// anywhere before 06-28 03:34 in this batch or any other file in the repo — and the filename-to-
+// content offsets are inconsistent (+2, +2, +1, +1, +1 days), which only makes sense as arbitrary
+// sequential batch labels rather than a single dating bug. That evidence argues for trusting the
+// date column, not the filename. The client confirmed twice, directly, that these files represent
+// real per-day sessions and the filenames should be trusted (matching the older jun-format
+// convention) despite that evidence — so filename wins here. Known, accepted consequence: since no
+// file exists named for 07-01 or 07-02, trusting filenames means those 2 dates now show zero
+// sessions in the dashboard (they previously inherited spillover from these files under the old
+// date-column-trust behavior).
+function classifyDailyFile(filename: string): { recognized: boolean; canonicalDate: string | null } {
+  const oldFormatDate = extractDateFromFilename(filename);
+  if (oldFormatDate) return { recognized: true, canonicalDate: oldFormatDate };
+  const newFormatMatch = filename.match(/^daily_(\d{4}-\d{2}-\d{2})_/i);
+  if (newFormatMatch) return { recognized: true, canonicalDate: newFormatMatch[1] };
+  return { recognized: false, canonicalDate: null };
 }
 
 function computeImprovementPriorities(a: {
@@ -565,14 +628,12 @@ let _variantMap: VariantMap | null = null;
 function loadKeywordVariants(): VariantMap {
   const result: VariantMap = new Map();
   if (!existsSync(DAILY_CSV_DIR)) return result;
-  let files: string[] = [];
-  try { files = readdirSync(DAILY_CSV_DIR).filter((f) => f.endsWith(".csv")); }
-  catch { return result; }
+  const files = listCsvFilesRecursive(DAILY_CSV_DIR);
 
   for (const file of files) {
-    const rows = parseCSV(resolve(DAILY_CSV_DIR, file));
+    const rows = parseCSV(file);
     for (const row of rows) {
-      const biz = resolveBizName(row["biz_name"]?.trim() ?? "");
+      const biz = resolveBizNameForRow(row["biz_name"]?.trim() ?? "", row["campaign_id"]?.trim() ?? "");
       const kw  = (row["keyword"] ?? row["keyword_text"] ?? "").trim();
       const variant = (row["keyword_variant"] ?? "").trim();
       if (!biz || !kw || !variant || variant === kw) continue;
@@ -599,18 +660,58 @@ let _dailyAnalysis: BusinessDailyAnalysis[] | null = null;
  * businesses and the old name appears "silent" even though the campaign is still running.
  */
 const BIZ_NAME_ALIASES: Record<string, string> = {
-  // Leo Lapuerta — pipeline dropped location suffixes for these 4 locations after Jun 13.
-  // Campaigns 9/10/11/12 still run — just under the generic name from Jun 15 onward.
+  // Leo Lapuerta — RESTORED the collapse-to-generic aliases for these 4 location-suffixed names
+  // on 2026-07-19, reversing a 2026-07-17 change. What happened: cross-referencing against the
+  // client roster showed these 4 names are legitimate separate roster entries while the generic
+  // bucket isn't, so the aliases were removed to preserve explicit historical location data.
+  // But verified against live Health Monitor output: the pipeline stopped tagging these 4 names
+  // entirely after 2026-06-13 — every session since then (the campaign never actually stopped)
+  // lands under the generic "Leo Lapuerta, MD Plastic Surgery" name instead. With the aliases
+  // removed, these 4 permanently show 7-day gaps / "Under Observation" / 0.0 avg-per-day — a
+  // false "gone silent" alarm for a real, currently-active client, forever, since the pipeline
+  // will never produce these exact names again. That's worse than the original problem. Re-
+  // collapsing them keeps ongoing/gap-day monitoring accurate (correctly shows as active via the
+  // generic bucket); their pre-Jun-13 session history is still on record, just no longer split
+  // out as its own live-monitored entity. Campaign_id can't safely reconstruct the split anyway —
+  // campaign 10 conflicts ~130/70 between the 14503 and 1919 addresses, campaign 11 conflicts
+  // ~117/70 between Webster and Pearland (real conflicting data, not a rare mislabel).
   "Leo Lapuerta, MD Plastic Surgery, 14503 Houston": "Leo Lapuerta, MD Plastic Surgery",
   "Leo Lapuerta, MD Plastic Surgery, 1919 Houston":  "Leo Lapuerta, MD Plastic Surgery",
   "Leo Lapuerta, MD Plastic Surgery, Katy":          "Leo Lapuerta, MD Plastic Surgery",
   "Leo Lapuerta, MD Plastic Surgery, Webster":       "Leo Lapuerta, MD Plastic Surgery",
-  // My Eye Guy Coffee Guy — pipeline changed capitalisation from Jun 15 onward.
-  "My Eye Guy Coffee Guy": "My EYE GUY Coffee Guy",
+  // Note: Clute and Pearland are NOT aliased — verified both are still receiving sessions under
+  // their own exact name through the current date, so no staleness risk from tracking them
+  // separately (unlike the 4 above).
+  // My Eye Guy Coffee Guy — was aliased backwards (rewrote the roster-matching name AWAY to a
+  // name that isn't in the roster at all). Fixed 2026-07-17: now maps the odd-caps pipeline
+  // variant to the name that actually appears in csv/Client/Client and business v2.xlsx.
+  "My EYE GUY Coffee Guy": "My Eye Guy Coffee Guy",
+  // American Plumbing Co — pipeline sometimes drops the ", San Diego" suffix (campaign_id 14).
+  // Roster (v2.xlsx) has the suffixed form under client "American Plumbing Co".
+  "American Plumbing Co | Plumber in San Diego": "American Plumbing Co | Plumber in San Diego, San Diego",
 };
 
 function resolveBizName(raw: string): string {
   return BIZ_NAME_ALIASES[raw] ?? raw;
+}
+
+// Overrides keyed by campaign_id, applied BEFORE the biz_name-keyed alias map above. Use only
+// when the row's own biz_name text is unreliable but campaign_id maps to a consistent address —
+// unlike BIZ_NAME_ALIASES (which trusts biz_name text), this distrusts biz_name entirely for
+// these specific campaigns.
+const CAMPAIGN_ID_BIZ_OVERRIDE: Record<string, string> = {
+  // Atlanta Basement Design — verified 2026-07-17: biz_name text alternates between "Johns
+  // Creek" and "Roswell" for the SAME campaign_id ~30% of the time, but the campaign_name/address
+  // is 100% consistent per campaign_id (no conflicts) — campaign 47 is always 6000 Medlock Bridge
+  // Pkwy, Johns Creek, GA; campaign 46 is always 1425 Old Ellis Road, Roswell, GA. Both are
+  // separate legitimate roster entries (client: Judith Smith).
+  "47": "Atlanta Basement Design, Johns Creek",
+  "46": "Atlanta Basement Design, Roswell",
+  "433362": "Atlanta Basement Design, Johns Creek", // stray duplicate id, same address as 47
+};
+
+function resolveBizNameForRow(rawBiz: string, campaignId: string): string {
+  return CAMPAIGN_ID_BIZ_OVERRIDE[campaignId] ?? resolveBizName(rawBiz);
 }
 
 function loadDailyAnalysis(): BusinessDailyAnalysis[] {
@@ -631,7 +732,7 @@ function loadDailyAnalysis(): BusinessDailyAnalysis[] {
   function processRow(row: Record<string, string>, canonicalDate: string | null) {
     const rawBiz = row["biz_name"]?.trim();
     if (!rawBiz) return;
-    const biz = resolveBizName(rawBiz);
+    const biz = resolveBizNameForRow(rawBiz, row["campaign_id"]?.trim() ?? "");
     if (archived.has(biz)) return;
 
     // Filename date wins for daily CSVs; fall back to date column for SESSIONS_CSV
@@ -689,15 +790,17 @@ function loadDailyAnalysis(): BusinessDailyAnalysis[] {
   // ── 1. Load SESSIONS_CSV (historical baseline) ─────────────────────────────
   for (const row of parseCSV(SESSIONS_CSV)) processRow(row, null);
 
-  // ── 2. Load daily consolidated CSV files (jun15–present) ──────────────────
-  // Filename date is the canonical date — overrides any UTC-bled date column values.
+  // ── 2. Load daily consolidated CSV files (jun15–present, recursively — files may be
+  //      organized into dated subfolders like "csv/June Folder/") ──────────────────
+  // Old filename format's date overrides any UTC-bled date column values. New format
+  // ("daily_YYYY-MM-DD_*.csv") has an unreliable filename date — falls back to each row's
+  // own `date` column instead (see classifyDailyFile).
   if (existsSync(DAILY_CSV_DIR)) {
-    let files: string[] = [];
-    try { files = readdirSync(DAILY_CSV_DIR).filter(f => f.endsWith(".csv")); } catch { /* skip */ }
+    const files = listCsvFilesRecursive(DAILY_CSV_DIR);
     for (const file of files) {
-      const canonicalDate = extractDateFromFilename(file);
-      if (!canonicalDate) continue; // skip non-daily files (rankings, etc.)
-      for (const row of parseCSV(resolve(DAILY_CSV_DIR, file))) processRow(row, canonicalDate);
+      const { recognized, canonicalDate } = classifyDailyFile(basename(file));
+      if (!recognized) continue; // skip non-daily files (rankings, client roster, etc.)
+      for (const row of parseCSV(file)) processRow(row, canonicalDate);
     }
   }
 
@@ -848,6 +951,36 @@ function loadDailyAnalysis(): BusinessDailyAnalysis[] {
     });
   }
 
+  // ── 3. Inject "not started" placeholders for paying clients with zero sessions ──
+  // (see NO_SESSIONS_YET in free-trial-businesses.ts). Without this, these clients are
+  // invisible everywhere downstream, since every view here is built by iterating session rows —
+  // a client with zero rows never gets an entry at all.
+  const todayIso = new Date().toISOString().slice(0, 10);
+  for (const bizName of NO_SESSIONS_YET) {
+    if (bizMap.has(bizName) || archived.has(bizName)) continue;
+    results.push({
+      bizName, clientName: "", campaignName: "", numCampaigns: 1, targetPerDay: 8,
+      allKeywords: [], daysActive: 0, totalSessions: 0,
+      firstDate: "", latestDate: "", phase: 0, phaseLabel: "Not Started",
+      latestDayData: null, sessionsToday: 0, successRateToday: 0,
+      keywordsHitToday: [], platformsToday: {},
+      avg7DaySessions: 0, avg7DaySuccessRate: 0, gapDays7: 0,
+      keywordCoverages: [], missedKeywords3Plus: [], missedKeywords5Plus: [],
+      platformWindows: PLATFORMS.map((p) => ({
+        platform: p, sessionsLast3Days: 0, sessionsLast5Days: 0,
+        consecutiveDaysSilent: 0, status: "NO_SESSIONS" as const,
+      })),
+      prediction: "TOO_EARLY", predictionLabel: "Not Started — No Sessions Yet", predictionEmoji: "🆕",
+      why: "This client has been onboarded but no sessions have run yet.",
+      action: "Kick off session generation for this campaign.",
+      nextRankingRunDue: addDays(todayIso, 14),
+      recentDays: [],
+      keywordVariants: {},
+      hasRankData: false, rankDetectionRate: null, avgRankPosition: null,
+      improvementPriorities: [],
+    });
+  }
+
   // Sort: AT_RISK first, then TOO_EARLY, then STABLE, then ON_TRACK
   const predOrd: Prediction[] = ["AT_RISK", "TOO_EARLY", "STABLE", "ON_TRACK"];
   return results.sort((a, b) => {
@@ -866,11 +999,114 @@ export function getBusinessDailyAnalysis(bizName: string): BusinessDailyAnalysis
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+// SECTION D — PER-CAMPAIGN PLATFORM ACTUALS (for Platform Allocation feature)
+// ══════════════════════════════════════════════════════════════════════════════
+// Unlike loadDailyAnalysis (which aggregates at the BUSINESS level — summing all of a
+// business's campaigns together), this aggregates at the CAMPAIGN level, since a single
+// business can run multiple campaigns (different locations/addresses) each with its own
+// platform-allocation targets. Runs its own pass over the same CSVs rather than piggybacking
+// on loadDailyAnalysis's bizMap, since campaign_id isn't tracked per-day there.
+
+export interface CampaignPlatformDay {
+  date: string;
+  chatgpt: number;
+  gemini: number;
+  perplexity: number;
+  total: number;
+}
+
+export interface CampaignPlatformActuals {
+  campaignId: string;
+  campaignName: string;
+  bizName: string;
+  clientName: string;
+  days: CampaignPlatformDay[]; // sorted ascending by date
+}
+
+let _campaignPlatformActuals: CampaignPlatformActuals[] | null = null;
+
+function loadCampaignPlatformActuals(): CampaignPlatformActuals[] {
+  const archived = loadArchiveSet();
+
+  type CampData = {
+    campaignName: string;
+    bizName: string;
+    clientName: string;
+    days: Map<string, { chatgpt: number; gemini: number; perplexity: number; total: number }>;
+  };
+  const campMap = new Map<string, CampData>();
+  const seenTimestamps = new Set<string>();
+
+  function processRow(row: Record<string, string>, canonicalDate: string | null) {
+    const campaignId = row["campaign_id"]?.trim();
+    if (!campaignId) return;
+    const rawBiz = row["biz_name"]?.trim();
+    if (!rawBiz) return;
+    const biz = resolveBizNameForRow(rawBiz, campaignId);
+    if (archived.has(biz) || isFreeTrial(biz)) return;
+
+    const date = canonicalDate ?? row["date"]?.slice(0, 10);
+    if (!date || date.length !== 10) return;
+
+    const ts = row["timestamp"]?.trim();
+    if (ts) {
+      const key = `${ts}|||${biz}|||${campaignId}`;
+      if (seenTimestamps.has(key)) return;
+      seenTimestamps.add(key);
+    }
+
+    const platform = normPlatform(row["ai_platform"] ?? row["platform"] ?? "");
+    const campaignName = row["campaign_name"]?.trim() ?? "";
+    const clientName = row["client_name"]?.trim() ?? "";
+
+    if (!campMap.has(campaignId)) {
+      campMap.set(campaignId, { campaignName, bizName: biz, clientName, days: new Map() });
+    }
+    const cd = campMap.get(campaignId)!;
+    if (campaignName && !cd.campaignName) cd.campaignName = campaignName;
+    if (clientName && !cd.clientName) cd.clientName = clientName;
+    if (!cd.days.has(date)) cd.days.set(date, { chatgpt: 0, gemini: 0, perplexity: 0, total: 0 });
+    const day = cd.days.get(date)!;
+    day.total++;
+    if (platform === "ChatGPT") day.chatgpt++;
+    else if (platform === "Gemini") day.gemini++;
+    else if (platform === "Perplexity") day.perplexity++;
+  }
+
+  for (const row of parseCSV(SESSIONS_CSV)) processRow(row, null);
+  if (existsSync(DAILY_CSV_DIR)) {
+    const files = listCsvFilesRecursive(DAILY_CSV_DIR);
+    for (const file of files) {
+      const { recognized, canonicalDate } = classifyDailyFile(basename(file));
+      if (!recognized) continue;
+      for (const row of parseCSV(file)) processRow(row, canonicalDate);
+    }
+  }
+
+  const results: CampaignPlatformActuals[] = [];
+  for (const [campaignId, cd] of campMap) {
+    const days = [...cd.days.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, d]) => ({ date, ...d }));
+    results.push({ campaignId, campaignName: cd.campaignName, bizName: cd.bizName, clientName: cd.clientName, days });
+  }
+  return results.sort((a, b) => a.bizName.localeCompare(b.bizName) || a.campaignId.localeCompare(b.campaignId));
+}
+
+export function getCampaignPlatformActuals(): CampaignPlatformActuals[] {
+  if (!_campaignPlatformActuals) _campaignPlatformActuals = loadCampaignPlatformActuals();
+  return _campaignPlatformActuals;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 // SECTION C — COMBINED DAILY OVERVIEW
 // ══════════════════════════════════════════════════════════════════════════════
 
 export interface DailyOverviewData {
   asOfDate: string;
+  // Calendar dates with suspiciously zero session volume sandwiched between two normal-volume
+  // days — likely a missing/mislabeled source file, not a real outage. See computeDataGapDates.
+  dataGapDates: string[];
   totalBusinesses: number;        // total with session data (matches Health Monitor)
   totalWithRankings: number;      // all businesses that have ANY ranking data
   totalWithComparableRankings: number; // rankings with 2+ run dates (can compute change)
@@ -930,9 +1166,26 @@ export interface DailyOverviewData {
 }
 
 export function getAsOfDate(): string {
-  const sessionDates = getAllDailyAnalysis().map((s) => s.latestDate).filter(Boolean);
+  const allBiz = getAllDailyAnalysis();
   const rankingDates = getAllRankings().map((r) => r.latestRunDate).filter(Boolean);
-  return [...sessionDates, ...rankingDates].sort().pop() ?? new Date().toISOString().slice(0, 10);
+
+  // Tally total sessions per calendar date across all businesses, to detect a partial/
+  // still-collecting trailing day (e.g. a batch exported mid-day). Treating a partial day as
+  // "today" for gap-day/AT_RISK analysis would make every business with a normal cadence look
+  // silent, since most won't have a session logged yet for a day that isn't finished.
+  const totalsByDate = new Map<string, number>();
+  for (const biz of allBiz) {
+    for (const d of biz.recentDays) totalsByDate.set(d.date, (totalsByDate.get(d.date) ?? 0) + d.total);
+  }
+  const sortedDates = [...totalsByDate.keys()].sort();
+  let sessionAsOf = sortedDates[sortedDates.length - 1] ?? "";
+  if (sortedDates.length >= 2) {
+    const latestTotal = totalsByDate.get(sortedDates[sortedDates.length - 1])!;
+    const priorTotal = totalsByDate.get(sortedDates[sortedDates.length - 2])!;
+    if (priorTotal > 0 && latestTotal < priorTotal * 0.5) sessionAsOf = sortedDates[sortedDates.length - 2];
+  }
+
+  return [sessionAsOf, ...rankingDates].filter(Boolean).sort().pop() ?? new Date().toISOString().slice(0, 10);
 }
 
 // ── Date-parameterized recomputation ─────────────────────────────────────────
@@ -1035,8 +1288,78 @@ function recomputeForDate(biz: BusinessDailyAnalysis, asOfDate: string): Busines
 }
 
 // ── Core overview builder (shared by date-less and date-parameterized paths) ──
-function buildDailyOverview(sessions: BusinessDailyAnalysis[], asOfDate: string): DailyOverviewData {
-  const rankings = getAllRankings();
+// Detects calendar dates with suspiciously zero session volume sandwiched between two days of
+// normal volume — a signature of a missing/mislabeled source file rather than a real portfolio-
+// wide outage (a real outage would also show reduced volume on the days immediately adjacent as
+// things ramp down/back up; an isolated single-file gap does not). Verified 2026-07-20: for the
+// "daily_YYYY-MM-DD_success.csv" batch, every file's rows are dated 1-2 days AFTER its own
+// filename (never on it), while all 24 preceding "junNN_..." files match their filename exactly —
+// so an isolated zero day here is far more likely a labeling/export gap than a true outage. This
+// is reported to the UI as a caveat, not silently corrected — we can't be certain from the CSVs
+// alone, and asserting either way risks hiding a real incident or crying wolf over a labeling bug.
+/**
+ * Calendar dates within the last 45 days (the longest rolling window used anywhere in this file)
+ * with zero session volume portfolio-wide despite normal volume immediately before and after —
+ * a signature of a missing/mislabeled source file rather than a real outage. Exposed so any route
+ * can surface it as a caveat alongside gap-day / AT_RISK counts.
+ */
+export function getRecentDataGapDates(asOfDate?: string): string[] {
+  const date = asOfDate ?? getAsOfDate();
+  return computeDataGapDates().filter((d) => d >= addDays(date, -45));
+}
+
+function computeDataGapDates(): string[] {
+  // Built from getCampaignPlatformActuals() rather than per-business recentDays — recentDays is a
+  // trailing-30-day window computed PER BUSINESS relative to that business's own latest date, so
+  // aggregating it across businesses with different windows produces spurious dips wherever fewer
+  // businesses' windows happen to overlap. getCampaignPlatformActuals aggregates every raw CSV row
+  // by its own date column directly, so a date's total here is a true, window-independent count.
+  const actuals = getCampaignPlatformActuals();
+  const totalsByDate = new Map<string, number>();
+  for (const c of actuals) {
+    for (const d of c.days) totalsByDate.set(d.date, (totalsByDate.get(d.date) ?? 0) + d.total);
+  }
+  const seenDates = [...totalsByDate.keys()].sort();
+  if (seenDates.length < 3) return [];
+  // Walk every CALENDAR day in the observed range, not just dates that appear as map keys — a
+  // date with zero rows anywhere never becomes a key at all, so it would otherwise be silently
+  // skipped rather than read as 0. Detects RUNS of one or more consecutive zero days (not just
+  // isolated single days) sandwiched between two normal-volume days — a 2-day run like Jun 26-27
+  // would never trigger a single-day check, since neither day individually has non-zero neighbors
+  // on both sides.
+  const dailyTotals: { date: string; total: number }[] = [];
+  for (let i = 0; ; i++) {
+    const cursor = addDays(seenDates[0], i);
+    if (cursor > seenDates[seenDates.length - 1]) break;
+    dailyTotals.push({ date: cursor, total: totalsByDate.get(cursor) ?? 0 });
+  }
+
+  const gaps: string[] = [];
+  let runStart = -1;
+  for (let i = 0; i < dailyTotals.length; i++) {
+    if (dailyTotals[i].total === 0) {
+      if (runStart === -1) runStart = i;
+      continue;
+    }
+    if (runStart !== -1) {
+      const before = dailyTotals[runStart - 1]?.total ?? 0;
+      const after = dailyTotals[i].total;
+      if (before >= 20 && after >= 20) {
+        for (let j = runStart; j < i; j++) gaps.push(dailyTotals[j].date);
+      }
+      runStart = -1;
+    }
+  }
+  return gaps;
+}
+
+function buildDailyOverview(allSessions: BusinessDailyAnalysis[], asOfDate: string): DailyOverviewData {
+  // Free-trial/test businesses are excluded from Health Monitor and Daily Session features
+  // (see free-trial-businesses.ts). Filtering here — not just on the route's response arrays —
+  // ensures aggregate counts (rankingsSummary, sessionsSummary, totalBusinesses, etc.) aren't
+  // inflated by them too.
+  const sessions = allSessions.filter((s) => !isFreeTrial(s.bizName));
+  const rankings = getAllRankings().filter((r) => !isFreeTrial(r.bizName));
   const sessMap = new Map(sessions.map((s) => [s.bizName, s]));
   const rankMap = new Map(rankings.map((r) => [r.bizName, r]));
 
@@ -1056,10 +1379,14 @@ function buildDailyOverview(sessions: BusinessDailyAnalysis[], asOfDate: string)
 
   // rankingsSummary — only count businesses with 2+ run dates (comparable)
   // First-run-only businesses are always BASELINE and excluded from change metrics
+  // Uses netTrendLabel (dominant trend across all tracked keywords), NOT overallLabel (worst
+  // single keyword) — otherwise one bad keyword out of ~15 flags the whole business as declining
+  // even when most of its keywords are flat or improving. Per-business badges/alerts elsewhere
+  // still use overallLabel so a single concerning keyword is still surfaced there.
   const rc = { suddenDrops: 0, suddenImprovements: 0, steadyDrop: 0, steadyImprovement: 0, baseline: 0, noChange: 0 };
   for (const rank of rankings) {
     if (rank.isFirstRunOnly) continue; // skip — no prior run to compare against
-    const l = rank.overallLabel;
+    const l = netTrendLabel(rank.keywords.map((k) => k.label));
     if (l === "SUDDEN_DROP" || l === "NOT_FOUND_CRITICAL") rc.suddenDrops++;
     else if (l === "SUDDEN_IMPROVEMENT" || l === "REAPPEARED") rc.suddenImprovements++;
     else if (l === "STEADY_DROP") rc.steadyDrop++;
@@ -1212,6 +1539,7 @@ function buildDailyOverview(sessions: BusinessDailyAnalysis[], asOfDate: string)
 
   return {
     asOfDate,
+    dataGapDates: getRecentDataGapDates(asOfDate),
     totalBusinesses: sessions.length,
     totalWithRankings: rankings.length,
     totalWithComparableRankings,
@@ -1413,7 +1741,7 @@ function loadAEOAnalysis(): BusinessAEOAnalysis[] {
 
   for (const row of rows) {
     if (row["status"]?.trim() !== "success") continue;
-    const biz      = resolveBizName(row["biz_name"]?.trim() ?? "");
+    const biz      = resolveBizNameForRow(row["biz_name"]?.trim() ?? "", row["campaign_id"]?.trim() ?? "");
     if (!biz || archived.has(biz)) continue;
     const platform = normPlatform(row["platform"] ?? "");
     const date     = row["date"]?.trim()?.slice(0, 10);
@@ -1659,22 +1987,35 @@ export interface BacklinkActionReport {
 
 const MONTH_ABBR = ["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"];
 
-function findDailyFile(date: string): string | null {
-  if (!existsSync(DAILY_CSV_DIR)) return null;
+// Finds every daily CSV file containing rows for the given date — not just the first match.
+// New-format files ("daily_YYYY-MM-DD_*.csv") can each span 2+ calendar dates, and a single
+// date's rows can be split across multiple files (verified 2026-07-17: 2026-07-01's rows were
+// 522 in one file and 938 in another — returning only the first file silently dropped 64% of
+// that date's data).
+function findDailyFiles(date: string): string[] {
+  if (!existsSync(DAILY_CSV_DIR)) return [];
   const d = new Date(date + "T00:00:00Z");
   const mon = MONTH_ABBR[d.getUTCMonth()];
   const day = String(d.getUTCDate()).padStart(2, "0");
   const pattern = `${mon}${day}`;
-  let files: string[] = [];
-  try { files = readdirSync(DAILY_CSV_DIR).filter(f => f.endsWith(".csv") || f.endsWith(".csv")); }
-  catch { return null; }
-  const match = files.find(f => f.toLowerCase().includes(pattern));
-  return match ? resolve(DAILY_CSV_DIR, match) : null;
+  const files = listCsvFilesRecursive(DAILY_CSV_DIR);
+  // Old format: filename directly encodes the date — exactly one file should match.
+  const nameMatches = files.filter(f => basename(f).toLowerCase().includes(pattern) && classifyDailyFile(basename(f)).canonicalDate !== null);
+  if (nameMatches.length) return nameMatches;
+  // New format: filename date is unreliable — collect every recognized file whose rows
+  // actually contain this date in their own `date` column.
+  const contentMatches: string[] = [];
+  for (const f of files) {
+    if (!classifyDailyFile(basename(f)).recognized) continue;
+    const rows = parseCSV(f);
+    if (rows.some(r => r["date"]?.slice(0, 10) === date)) contentMatches.push(f);
+  }
+  return contentMatches;
 }
 
 export function getBacklinkActionItems(date: string): BacklinkActionReport {
-  const filePath = findDailyFile(date);
-  if (!filePath) {
+  const filePaths = findDailyFiles(date);
+  if (!filePaths.length) {
     return {
       date, sourceFile: null,
       totalBusinessesWithInjected: 0, totalInjectedSessions: 0,
@@ -1683,7 +2024,8 @@ export function getBacklinkActionItems(date: string): BacklinkActionReport {
     };
   }
 
-  const rows = parseCSV(filePath);
+  // New-format files can span more than one date — restrict to rows matching the requested date.
+  const rows = filePaths.flatMap(fp => parseCSV(fp)).filter(r => r["date"]?.slice(0, 10) === date);
   const injected = rows.filter(r => r["backlink_injected"]?.toLowerCase() === "true");
 
   // Build a biz→clientName lookup from master session data (has human-readable names;
@@ -1694,7 +2036,7 @@ export function getBacklinkActionItems(date: string): BacklinkActionReport {
   // Group by business
   const bizMap = new Map<string, { clientName: string; sessions: Array<{ platform: string; found: boolean; url: string }> }>();
   for (const r of injected) {
-    const biz = resolveBizName(r["biz_name"]?.trim() ?? "");
+    const biz = resolveBizNameForRow(r["biz_name"]?.trim() ?? "", r["campaign_id"]?.trim() ?? "");
     if (!biz) continue;
     const clientName = bizClientLookup.get(biz) ?? r["client_name"]?.trim() ?? "";
     if (!bizMap.has(biz)) bizMap.set(biz, { clientName, sessions: [] });
@@ -1757,7 +2099,7 @@ export function getBacklinkActionItems(date: string): BacklinkActionReport {
 
   return {
     date,
-    sourceFile: filePath.split("/").pop() ?? null,
+    sourceFile: filePaths.map(fp => fp.split("/").pop()).join(", ") || null,
     totalBusinessesWithInjected: bizMap.size,
     totalInjectedSessions,
     totalFoundSessions,

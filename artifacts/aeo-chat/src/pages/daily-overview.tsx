@@ -8,9 +8,13 @@ import {
   Calendar, RefreshCw, Search, Loader2, AlertCircle,
   TrendingUp, TrendingDown, Minus, AlertTriangle,
   BarChart2, CheckCircle2, ChevronDown, ChevronRight, MessageSquare,
-  ClipboardList, Zap, Eye, Trophy, Link2, Sparkles, Target,
+  ClipboardList, Zap, Eye, Trophy, Link2, Sparkles, Target, PieChart,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  AllocationSummaryTiles, AllocationTable, AllocationSearchBar,
+  type AllocationStatus, type AllocationSummary, type CampaignAllocation,
+} from "@/components/platform-allocation-panel";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 type Prediction = "ON_TRACK" | "AT_RISK" | "STABLE" | "TOO_EARLY";
@@ -103,6 +107,7 @@ interface KwRotationBiz {
 
 interface DailyOverview {
   asOfDate: string;
+  dataGapDates: string[];
   totalBusinesses: number;
   totalWithRankings: number;
   totalWithComparableRankings: number;
@@ -120,6 +125,13 @@ interface DailyOverview {
   businesses: BizRow[];
   keywordRotationGap: KwRotationBiz[];
   keywordRotationTotal: number;
+}
+
+interface AllocationData {
+  asOfDate: string;
+  campaigns: CampaignAllocation[];
+  total: number;
+  summary: AllocationSummary;
 }
 
 interface ByDateBiz {
@@ -159,6 +171,32 @@ function fmt(d: string): string {
     { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
 }
 function pct(v: number): string { return `${(v * 100).toFixed(0)}%`; }
+
+// ── Data gap banner ──────────────────────────────────────────────────────────
+// Surfaces dates where the portfolio shows zero sessions despite normal volume on surrounding
+// days — usually a missing/mislabeled source file, not a real outage. Intentionally does not
+// assert which one, since that can't be determined from the CSVs alone; asserting a real gap
+// when it's a labeling artifact would be a false alarm, silently fixing it could hide a real one.
+function DataGapBanner({ dates }: { dates: string[] }) {
+  const [dismissed, setDismissed] = useState(false);
+  if (dates.length === 0 || dismissed) return null;
+  return (
+    <div className="rounded-xl border border-amber-400/40 bg-amber-50 dark:bg-amber-950/30 p-3 flex items-start gap-2.5">
+      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+      <div className="flex-1 min-w-0">
+        <p className="text-xs font-semibold text-amber-800 dark:text-amber-300">
+          No sessions recorded portfolio-wide on {dates.map(fmt).join(", ")}
+        </p>
+        <p className="text-[11px] text-amber-700/80 dark:text-amber-400/80 mt-0.5 leading-relaxed">
+          Every other business and platform shows zero on these dates while surrounding days have normal volume — likely a missing
+          or mislabeled source file rather than a real outage. This inflates 7-day gap-day and "At Risk" counts until the rolling
+          window passes them; verify with whoever runs the session pipeline before trusting those flags for this window.
+        </p>
+      </div>
+      <button onClick={() => setDismissed(true)} className="text-amber-600/60 hover:text-amber-700 text-xs shrink-0">✕</button>
+    </div>
+  );
+}
 
 // ── Improved Businesses Sidebar ───────────────────────────────────────────────
 function ImprovedSidebar({ businesses, excludeFirstRun }: { businesses: BizRow[]; excludeFirstRun: boolean }) {
@@ -2071,6 +2109,9 @@ export function DailyOverviewPage() {
   const [byDateData, setByDateData] = useState<ByDateData | null>(null);
   const [excludeFirstRun, setExcludeFirstRun] = useState(true);
   const [backlinkReport, setBacklinkReport] = useState<BacklinkActionReport | null>(null);
+  const [allocationData, setAllocationData] = useState<AllocationData | null>(null);
+  const [allocationFilter, setAllocationFilter] = useState<AllocationStatus | "PLATFORM_GAP" | "all">("all");
+  const [allocationSearch, setAllocationSearch] = useState("");
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryText, setSummaryText] = useState<string | null>(null);
   const [summaryError, setSummaryError] = useState<string | null>(null);
@@ -2131,15 +2172,24 @@ export function DailyOverviewPage() {
       fetch(`/api/csv/daily/overview?date=${date}`).then(r => r.json()),
       fetch(`/api/csv/sessions/by-date?date=${date}`).then(r => r.json()),
       fetch(`/api/csv/backlinks/action-items?date=${date}`).then(r => r.json()).catch(() => null),
+      fetch(`/api/platform-allocation?date=${date}`).then(r => r.json()).catch(() => null),
     ])
-      .then(([overview, byDate, backlinks]) => {
+      .then(([overview, byDate, backlinks, allocation]) => {
         setData(overview);
         setByDateData(byDate);
         if (backlinks) setBacklinkReport(backlinks);
+        if (allocation) setAllocationData(allocation);
         setLoading(false);
       })
       .catch((e) => { setError(e.message); setLoading(false); });
   }, []);
+
+  const refetchAllocation = useCallback(() => {
+    const date = reportDate || data?.asOfDate;
+    if (!date) return;
+    fetch(`/api/platform-allocation?date=${date}`).then(r => r.json()).then(setAllocationData).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reportDate, data?.asOfDate]);
 
   const load = useCallback(() => {
     if (reportDate) { loadForDate(reportDate); return; }
@@ -2280,6 +2330,8 @@ export function DailyOverviewPage() {
           </div>
         </div>
 
+        <DataGapBanner dates={data.dataGapDates} />
+
         {/* ── AI Day Summary output ────────────────────────────────────────── */}
         {(summaryText || summaryError) && (
           <div className={cn("rounded-xl border p-4", summaryError ? "border-blue-400/40 bg-blue-500/5" : "border-primary/20 bg-primary/5")}>
@@ -2406,6 +2458,13 @@ export function DailyOverviewPage() {
                 const actionCount = backlinkReport.immediateAction.length + backlinkReport.monitorClosely.filter(i => !allActiveSet.has(i.bizName)).length;
                 return actionCount > 0 ? <span className="text-red-500 font-bold">({actionCount})</span> : null;
               })()}
+            </TabsTrigger>
+            <TabsTrigger value="allocation" className="text-xs h-8 gap-1.5">
+              <PieChart className="w-3 h-3" />
+              Allocation
+              {allocationData && (allocationData.summary.MISSED + allocationData.summary.platformGap) > 0 && (
+                <span className="text-blue-500 font-bold">({allocationData.summary.MISSED + allocationData.summary.platformGap})</span>
+              )}
             </TabsTrigger>
             <TabsTrigger value="chat" className="text-xs h-8 gap-1.5">
               <MessageSquare className="w-3 h-3" />AI Chat
@@ -2710,6 +2769,36 @@ export function DailyOverviewPage() {
           {/* Per-business reports tab (Section 10 format) */}
           <TabsContent value="reports" className="mt-4">
             <PerBusinessReports businesses={filteredBiz} parentSearch={search} />
+          </TabsContent>
+
+          {/* Per-Campaign Platform Allocation tab */}
+          <TabsContent value="allocation" className="mt-4 space-y-4">
+            {!allocationData ? (
+              <div className="flex items-center justify-center py-16">
+                <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+              </div>
+            ) : (
+              <>
+                <div className="rounded-xl border border-border p-4">
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground mb-1">
+                    Per-Campaign Platform Allocation — {allocationData.total} campaigns
+                  </p>
+                  <p className="text-[10px] text-muted-foreground mb-3">
+                    Each campaign has an Expected sessions/day target split across ChatGPT, Gemini, and Perplexity. Keyword-to-platform
+                    assignments rotate randomly, but daily platform totals should meet the configured allocation. Click a campaign to view
+                    or edit its targets.
+                  </p>
+                  <AllocationSummaryTiles summary={allocationData.summary} activeFilter={allocationFilter} onFilterChange={setAllocationFilter} />
+                </div>
+                <AllocationSearchBar search={allocationSearch} onSearchChange={setAllocationSearch} />
+                <AllocationTable
+                  campaigns={allocationData.campaigns}
+                  filter={allocationFilter}
+                  search={allocationSearch}
+                  onSaved={refetchAllocation}
+                />
+              </>
+            )}
           </TabsContent>
 
           {/* AI Chat tab — forceMount keeps the panel alive so fetches survive tab switches */}
