@@ -9,6 +9,7 @@ import healthMonitorRouter from "./health-monitor";
 import dailyOverviewRouter from "./daily-overview";
 import csvRouter from "./csv";
 import archiveRouter from "./archive-route";
+import platformAllocationRouter from "./platform-allocation-route";
 
 const router: IRouter = Router();
 
@@ -22,5 +23,6 @@ router.use(healthMonitorRouter);
 router.use(dailyOverviewRouter);
 router.use(csvRouter);
 router.use(archiveRouter);
+router.use(platformAllocationRouter);
 
 export default router;

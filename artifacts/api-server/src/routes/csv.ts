@@ -13,6 +13,7 @@ import {
   getAllAEOAnalysis,
   getBusinessAEOAnalysis,
   getBacklinkActionItems,
+  getRecentDataGapDates,
   clearCache,
   type Prediction,
   type PerformanceTier,
@@ -99,7 +100,8 @@ router.get("/csv/sessions/overview", (req, res) => {
     const dateParam = req.query["date"] as string | undefined;
     const isValidDate = dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam);
     const asOfDate = isValidDate ? dateParam! : getAsOfDate();
-    const sessions = isValidDate ? getDailyAnalysisForDate(dateParam!) : getAllDailyAnalysis();
+    const sessions = (isValidDate ? getDailyAnalysisForDate(dateParam!) : getAllDailyAnalysis())
+      .filter((b) => !isFreeTrial(b.bizName));
     const data = sessions.map((b) => ({
       bizName: b.bizName,
       clientName: b.clientName,
@@ -129,7 +131,7 @@ router.get("/csv/sessions/overview", (req, res) => {
       avgRankPosition: b.avgRankPosition,
       improvementPriorities: b.improvementPriorities,
     }));
-    res.json({ businesses: data, total: data.length, asOfDate });
+    res.json({ businesses: data, total: data.length, asOfDate, dataGapDates: getRecentDataGapDates(asOfDate) });
   } catch (err: unknown) {
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
   }

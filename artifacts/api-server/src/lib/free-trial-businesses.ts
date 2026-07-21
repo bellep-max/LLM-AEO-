@@ -2,7 +2,7 @@
  * Free-trial / non-paying businesses — excluded from Health Monitor and Daily Session features.
  * Source of truth: csv/Client and business v2.xlsx
  * Any business running sessions that does NOT appear in v2 is treated as free trial.
- * Last synced: 2026-06-29
+ * Last synced: 2026-07-17
  */
 export const FREE_TRIAL_BUSINESSES = new Set([
   // ── Confirmed free trials (appeared in CSVs, not in v2 xlsx) ──────────────
@@ -10,6 +10,19 @@ export const FREE_TRIAL_BUSINESSES = new Set([
   "LAKE TAHOE BOAT TOURS",
   "Red River Revel",
   "WEBSITE",
+
+  // ── Found in jun25–jun30 batch, not in v2 xlsx (synced 2026-07-17) ─────────
+  // NOTE: "American Plumbing Co | Plumber in San Diego" was here in error — it's the same
+  // campaign_id (14) as roster entry "American Plumbing Co | Plumber in San Diego, San Diego"
+  // (client: American Plumbing Co), just missing the city suffix. Aliased instead — see
+  // BIZ_NAME_ALIASES in csv-data.ts.
+  // NOTE: "Citedlogic" and "Signal AEO" were here in error — confirmed 2026-07-20 these are
+  // paying active clients, just not in the roster xlsx snapshot. Removed from this list so
+  // they show up in Health Monitor / Daily Overview like any other active business.
+  "33 Evergreen Place",
+  "Bladez Hair Studio",
+  "Flores Tree Services Climbing To The Top, LLC",
+  "Rose Bevilacqua",
 
   // ── Historical free trials (ran earlier sessions, now inactive) ───────────
   "A Silent Moment Spa Organic",
@@ -88,7 +101,7 @@ export const FREE_TRIAL_BUSINESSES = new Set([
   "Seattle, WA Boudoir & Portrait Photography",
   "Seed Of Kindness, LLC",
   "Seven Seas and Suitcases LLC",
-  "horeline Trees LLC",
+  "Shoreline Trees LLC",
   "Skin Secrets",
   "Stephen Mattner Painting",
   "Tahoe Blue Association Management",
@@ -144,6 +157,8 @@ export const NO_SESSIONS_YET = new Set([
   "The Reserve at Rye 290",
   "Vivo Living Willowbrook",
   "Wilnez Home Improvement LLC",
+  // Added 2026-07-20 per client request — not yet in the roster xlsx or any session CSV.
+  "Jordan Valley Detailing",
 ]);
 
 export function isNotStarted(businessName: string): boolean {

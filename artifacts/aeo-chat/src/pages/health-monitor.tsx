@@ -7,8 +7,12 @@ import { cn } from "@/lib/utils";
 import {
   Activity, Search, Loader2, AlertCircle, ChevronRight,
   TrendingUp, TrendingDown, Minus, Calendar, RefreshCw, MessageSquare,
-  Link2, AlertTriangle, CheckCircle2, Eye, Sparkles, Target,
+  Link2, AlertTriangle, CheckCircle2, Eye, Sparkles, Target, PieChart,
 } from "lucide-react";
+import {
+  AllocationSummaryTiles, AllocationTable, AllocationSearchBar,
+  type AllocationStatus, type AllocationSummary, type CampaignAllocation,
+} from "@/components/platform-allocation-panel";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 type Prediction = "ON_TRACK" | "AT_RISK" | "STABLE" | "TOO_EARLY";
@@ -96,6 +100,13 @@ interface BusinessOverview {
   improvementPriorities: ImprovementPriority[];
 }
 
+interface AllocationData {
+  asOfDate: string;
+  campaigns: CampaignAllocation[];
+  total: number;
+  summary: AllocationSummary;
+}
+
 interface BusinessDetail extends BusinessOverview {
   allKeywords: string[];
   keywordCoverages: KeywordCoverage[];
@@ -129,6 +140,31 @@ function fmt(date: string): string {
 
 function pct(v: number): string {
   return `${(v * 100).toFixed(0)}%`;
+}
+
+// ── Data gap banner ──────────────────────────────────────────────────────────
+// Surfaces dates where the portfolio shows zero sessions despite normal volume on surrounding
+// days — usually a missing/mislabeled source file, not a real outage. Intentionally does not
+// assert which one, since that can't be determined from the CSVs alone.
+function DataGapBanner({ dates }: { dates: string[] }) {
+  const [dismissed, setDismissed] = useState(false);
+  if (dates.length === 0 || dismissed) return null;
+  return (
+    <div className="rounded-xl border border-amber-400/40 bg-amber-50 dark:bg-amber-950/30 p-3 flex items-start gap-2.5 mb-4">
+      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+      <div className="flex-1 min-w-0">
+        <p className="text-xs font-semibold text-amber-800 dark:text-amber-300">
+          No sessions recorded portfolio-wide on {dates.map(fmt).join(", ")}
+        </p>
+        <p className="text-[11px] text-amber-700/80 dark:text-amber-400/80 mt-0.5 leading-relaxed">
+          Every business and platform shows zero on these dates while surrounding days have normal volume — likely a missing or
+          mislabeled source file rather than a real outage. This inflates 7-day gap-day and "At Risk" counts until the rolling
+          window passes them; verify with whoever runs the session pipeline before trusting those flags for this window.
+        </p>
+      </div>
+      <button onClick={() => setDismissed(true)} className="text-amber-600/60 hover:text-amber-700 text-xs shrink-0">✕</button>
+    </div>
+  );
 }
 
 function kpiIcon(val: number, target: number, warnFrac = 0.9, critFrac = 0.7): "✅" | "⚠️" | "🚨" {
@@ -265,7 +301,12 @@ function TrendBar({ days, target }: { days: DayRecord[]; target: number }) {
 }
 
 // ── Detail Panel — Section 6 format ───────────────────────────────────────────
-function DetailPanel({ detail, asOfDate }: { detail: BusinessDetail; asOfDate: string }) {
+function DetailPanel({ detail, asOfDate, allocation, onAllocationSaved }: {
+  detail: BusinessDetail;
+  asOfDate: string;
+  allocation: CampaignAllocation[];
+  onAllocationSaved: () => void;
+}) {
   const [briefLoading, setBriefLoading] = useState(false);
   const [briefText, setBriefText] = useState<string | null>(null);
   const [briefError, setBriefError] = useState<string | null>(null);
@@ -445,6 +486,19 @@ function DetailPanel({ detail, asOfDate }: { detail: BusinessDetail; asOfDate: s
           {detail.platformWindows.map((pw) => <PlatformBlock key={pw.platform} pw={pw} />)}
         </div>
       </section>
+
+      {/* ── PLATFORM ALLOCATION ──────────────────────────────────────── */}
+      {allocation.length > 0 && (
+        <section>
+          <h3 className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground mb-1 flex items-center gap-1.5">
+            <PieChart className="w-3.5 h-3.5" /> Platform Allocation — {allocation.length} campaign{allocation.length !== 1 ? "s" : ""}
+          </h3>
+          <p className="text-[10px] text-muted-foreground mb-2">
+            Actual vs. configured Expected/ChatGPT/Gemini/Perplexity targets for {fmt(asOfDate || detail.latestDate)}. Click a campaign to edit its targets.
+          </p>
+          <AllocationTable campaigns={allocation} filter="all" search="" onSaved={onAllocationSaved} showBizName={false} />
+        </section>
+      )}
 
       {/* ── KEYWORD COVERAGE ─────────────────────────────────────────── */}
       {detail.keywordCoverages.length > 0 && (
@@ -666,6 +720,7 @@ function DetailPanel({ detail, asOfDate }: { detail: BusinessDetail; asOfDate: s
 export function HealthMonitorPage() {
   const [businesses, setBusinesses] = useState<BusinessOverview[]>([]);
   const [asOfDate, setAsOfDate] = useState("");
+  const [dataGapDates, setDataGapDates] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -680,6 +735,14 @@ export function HealthMonitorPage() {
   const [chatOpen, setChatOpen] = useState(false);
 
   const [backlinkReport, setBacklinkReport] = useState<BacklinkActionReport | null>(null);
+  const [allocationData, setAllocationData] = useState<AllocationData | null>(null);
+  const [allocationFilter, setAllocationFilter] = useState<AllocationStatus | "PLATFORM_GAP" | "all">("all");
+  const [allocationSearch, setAllocationSearch] = useState("");
+
+  function loadAllocation(date?: string) {
+    const url = date ? `/api/platform-allocation?date=${date}` : "/api/platform-allocation";
+    fetch(url).then(r => r.json()).then(setAllocationData).catch(() => {});
+  }
 
   function loadList(date?: string) {
     setLoading(true);
@@ -690,6 +753,7 @@ export function HealthMonitorPage() {
       .then((d) => {
         setBusinesses(d.businesses ?? []);
         if (d.asOfDate) setAsOfDate(d.asOfDate);
+        setDataGapDates(d.dataGapDates ?? []);
         setLoading(false);
       })
       .catch((e) => { setListError(e.message); setLoading(false); });
@@ -710,13 +774,14 @@ export function HealthMonitorPage() {
             .then(r => r.json())
             .then(setBacklinkReport)
             .catch(() => {});
+          loadAllocation(latest);
         }
       })
       .catch(() => loadList());
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // When the date picker changes, reload the list, backlinks, and re-fetch detail if open
+  // When the date picker changes, reload the list, backlinks, allocation, and re-fetch detail if open
   useEffect(() => {
     if (!reportDate) return;
     loadList(reportDate);
@@ -724,6 +789,7 @@ export function HealthMonitorPage() {
       .then(r => r.json())
       .then(setBacklinkReport)
       .catch(() => {});
+    loadAllocation(reportDate);
     if (selected) {
       setLoadingDetail(true);
       setDetail(null);
@@ -938,6 +1004,7 @@ export function HealthMonitorPage() {
         ) : (
         <ScrollArea className="flex-1">
           <div className="p-6">
+            <DataGapBanner dates={dataGapDates} />
             {loadingDetail ? (
               <div className="flex flex-col items-center justify-center h-64 gap-3">
                 <Loader2 className="w-6 h-6 animate-spin text-primary" />
@@ -954,7 +1021,12 @@ export function HealthMonitorPage() {
                 </div>
               </div>
             ) : detail ? (
-              <DetailPanel detail={detail} asOfDate={asOfDate} />
+              <DetailPanel
+                detail={detail}
+                asOfDate={asOfDate}
+                allocation={(allocationData?.campaigns ?? []).filter((c) => c.bizName === detail.bizName)}
+                onAllocationSaved={() => loadAllocation(reportDate || undefined)}
+              />
             ) : (
               /* Welcome / summary state */
               <div className="space-y-5">
@@ -983,6 +1055,30 @@ export function HealthMonitorPage() {
                         );
                       })}
                     </div>
+                  </div>
+                )}
+
+                {/* ── Platform Allocation Panel ───────────────────────────── */}
+                {allocationData && allocationData.total > 0 && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+                        <PieChart className="w-3.5 h-3.5" /> Per-Campaign Platform Allocation — {allocationData.total} campaigns
+                      </p>
+                      <span className="text-[10px] text-muted-foreground">as of {fmt(allocationData.asOfDate)}</span>
+                    </div>
+                    <AllocationSummaryTiles summary={allocationData.summary} activeFilter={allocationFilter} onFilterChange={setAllocationFilter} />
+                    {allocationFilter !== "all" && (
+                      <>
+                        <AllocationSearchBar search={allocationSearch} onSearchChange={setAllocationSearch} />
+                        <AllocationTable
+                          campaigns={allocationData.campaigns}
+                          filter={allocationFilter}
+                          search={allocationSearch}
+                          onSaved={() => loadAllocation(reportDate || undefined)}
+                        />
+                      </>
+                    )}
                   </div>
                 )}
 
